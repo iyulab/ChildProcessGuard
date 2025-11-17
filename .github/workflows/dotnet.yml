@@ -55,7 +55,7 @@ jobs:
       run: dotnet build ${{ env.PROJECT_PATH }} --configuration Release --no-restore
 
     - name: Test
-      run: dotnet test ${{ env.TEST_PATH }} --configuration Release --verbosity normal --filter "Category!=LongRunning"
+      run: dotnet test ${{ env.TEST_PATH }} --configuration Release --verbosity normal
 
     - name: Pack
       if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.check_tag.outputs.exists == 'false'
