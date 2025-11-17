@@ -6,13 +6,14 @@ on:
     paths:
       - 'Directory.Build.props'
       - 'src/**'
+      - 'tests/**'
       - '.github/workflows/dotnet.yml'
   pull_request:
     branches: [ "main" ]
 
 env:
-  DOTNET_VERSION: '9.0.x'
   PROJECT_PATH: 'src/ChildProcessGuard/ChildProcessGuard.csproj'
+  TEST_PATH: 'tests/ChildProcessGuard.Tests/ChildProcessGuard.Tests.csproj'
 
 jobs:
   build:
@@ -25,7 +26,9 @@ jobs:
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: ${{ env.DOTNET_VERSION }}
+        dotnet-version: |
+          9.0.x
+          10.0.x
 
     - name: Extract version from Directory.Build.props
       id: get_version
@@ -52,7 +55,7 @@ jobs:
       run: dotnet build ${{ env.PROJECT_PATH }} --configuration Release --no-restore
 
     - name: Test
-      run: dotnet test ${{ env.PROJECT_PATH }} --no-build --verbosity normal --configuration Release
+      run: dotnet test ${{ env.TEST_PATH }} --configuration Release --verbosity normal
 
     - name: Pack
       if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.check_tag.outputs.exists == 'false'
@@ -84,11 +87,17 @@ jobs:
         tag_name: v${{ steps.get_version.outputs.version }}
         name: Release v${{ steps.get_version.outputs.version }}
         body: |
-          ## What's Changed
+          ## Release Notes
 
+          Version ${{ steps.get_version.outputs.version }} of ChildProcessGuard has been released.
+
+          ### Changes
           See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
 
-          **Full Changelog**: https://github.com/${{ github.repository }}/compare/v${{ steps.get_version.outputs.version }}...v${{ steps.get_version.outputs.version }}
+          ### Installation
+          ```bash
+          dotnet add package ChildProcessGuard --version ${{ steps.get_version.outputs.version }}
+          ```
         draft: false
         prerelease: false
         files: ./nupkg/*.nupkg
