@@ -36,9 +36,14 @@ public class ProcessGuardianOptions
     public TimeSpan CleanupInterval { get; set; } = TimeSpan.FromMinutes(5);
 
     /// <summary>
-    /// Whether to use process groups on Unix systems for better process tree management
+    /// Whether to use process groups on Unix systems for better process tree management.
+    /// NOTE: Currently not supported due to .NET API limitations. Process groups must be set
+    /// from within the child process, but .NET does not provide a pre-spawn hook.
+    /// This option is reserved for future use when .NET provides the necessary API.
+    /// Manual process tree tracking is used instead on Unix systems.
     /// </summary>
-    public bool UseProcessGroupsOnUnix { get; set; } = true;
+    [Obsolete("Unix process groups are not currently supported due to .NET API limitations. This option has no effect.", false)]
+    public bool UseProcessGroupsOnUnix { get; set; } = false;
 
     /// <summary>
     /// Whether to throw exceptions on process operation failures

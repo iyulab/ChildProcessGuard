@@ -1,39 +1,94 @@
 name: .NET Build and NuGet Publish
+
 on:
   push:
     branches: [ "main" ]
-    tags: [ "v*" ]
+    paths:
+      - 'Directory.Build.props'
+      - 'src/**'
+      - '.github/workflows/dotnet.yml'
   pull_request:
     branches: [ "main" ]
+
 env:
   DOTNET_VERSION: '9.0.x'
-  SOLUTION_PATH: 'src/ChildProcessGuard.sln'
   PROJECT_PATH: 'src/ChildProcessGuard/ChildProcessGuard.csproj'
-  
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    
+      with:
+        fetch-depth: 0
+
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
-    
+
+    - name: Extract version from Directory.Build.props
+      id: get_version
+      run: |
+        VERSION=$(grep -oP '<Version>\K[^<]+' Directory.Build.props)
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "📦 Package Version: $VERSION"
+
+    - name: Check if version tag exists
+      id: check_tag
+      run: |
+        if git rev-parse "v${{ steps.get_version.outputs.version }}" >/dev/null 2>&1; then
+          echo "exists=true" >> $GITHUB_OUTPUT
+          echo "⚠️ Tag v${{ steps.get_version.outputs.version }} already exists"
+        else
+          echo "exists=false" >> $GITHUB_OUTPUT
+          echo "✅ Tag v${{ steps.get_version.outputs.version }} is new"
+        fi
+
     - name: Restore dependencies
-      run: dotnet restore ${{ env.SOLUTION_PATH }}
-    
+      run: dotnet restore ${{ env.PROJECT_PATH }}
+
     - name: Build
-      run: dotnet build ${{ env.SOLUTION_PATH }} --configuration Release --no-restore
-    
+      run: dotnet build ${{ env.PROJECT_PATH }} --configuration Release --no-restore
+
     - name: Test
-      run: dotnet test ${{ env.SOLUTION_PATH }} --no-build --verbosity normal --configuration Release
-    
+      run: dotnet test ${{ env.PROJECT_PATH }} --no-build --verbosity normal --configuration Release
+
     - name: Pack
-      if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-      run: dotnet pack ${{ env.PROJECT_PATH }} --configuration Release --no-build --output nupkg
-    
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.check_tag.outputs.exists == 'false'
+      run: |
+        dotnet pack ${{ env.PROJECT_PATH }} --configuration Release --no-build --output nupkg
+        echo "📦 Created package with version ${{ steps.get_version.outputs.version }}"
+
+    - name: Create Git Tag
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.check_tag.outputs.exists == 'false'
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git tag -a "v${{ steps.get_version.outputs.version }}" -m "Release v${{ steps.get_version.outputs.version }}"
+        git push origin "v${{ steps.get_version.outputs.version }}"
+
     - name: Push to NuGet
-      if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-      run: dotnet nuget push ./nupkg/*.nupkg --source https://api.nuget.org/v3/index.json --api-key ${{ secrets.NUGET_API_KEY }} --skip-duplicate
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.check_tag.outputs.exists == 'false'
+      run: |
+        dotnet nuget push ./nupkg/*.nupkg \
+          --source https://api.nuget.org/v3/index.json \
+          --api-key ${{ secrets.NUGET_API_KEY }} \
+          --skip-duplicate
+        echo "✅ Published version ${{ steps.get_version.outputs.version }} to NuGet"
+
+    - name: Create GitHub Release
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.check_tag.outputs.exists == 'false'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ steps.get_version.outputs.version }}
+        name: Release v${{ steps.get_version.outputs.version }}
+        body: |
+          ## What's Changed
+
+          See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
+
+          **Full Changelog**: https://github.com/${{ github.repository }}/compare/v${{ steps.get_version.outputs.version }}...v${{ steps.get_version.outputs.version }}
+        draft: false
+        prerelease: false
+        files: ./nupkg/*.nupkg

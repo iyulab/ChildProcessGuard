@@ -276,9 +276,11 @@ public class ProcessGuardianBuilder
 
     /// <summary>
     /// Enables or disables process groups on Unix systems
+    /// NOTE: This feature is currently not supported due to .NET API limitations.
     /// </summary>
     /// <param name="enabled">Whether to use process groups</param>
     /// <returns>Builder instance</returns>
+    [Obsolete("Unix process groups are not currently supported due to .NET API limitations. This method has no effect.", false)]
     public ProcessGuardianBuilder WithProcessGroupsOnUnix(bool enabled = true)
     {
         _options.UseProcessGroupsOnUnix = enabled;

@@ -15,10 +15,11 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
     private readonly ProcessGuardianOptions _options;
     private readonly Timer? _cleanupTimer;
     private IntPtr _jobHandle = IntPtr.Zero;
-    private bool _isDisposed;
+    private int _disposed = 0; // 0 = not disposed, 1 = disposed (thread-safe)
     private readonly bool _isWindows;
     private readonly bool _isUnix;
     private readonly SemaphoreSlim _operationSemaphore;
+    private bool _useManualProcessTracking = false; // Fallback when Job Object fails
 
     /// <summary>
     /// Event raised when a process error occurs
@@ -43,7 +44,7 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
     /// <summary>
     /// Gets whether the guardian is disposed
     /// </summary>
-    public bool IsDisposed => _isDisposed;
+    public bool IsDisposed => _disposed != 0;
 
     /// <summary>
     /// Gets the configuration options
@@ -95,8 +96,8 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
     /// <param name="workingDirectory">The working directory</param>
     /// <param name="environmentVariables">A dictionary of environment variables</param>
     /// <returns>The started process</returns>
-    public Process StartProcess(string fileName, string arguments = "", string workingDirectory = null,
-        Dictionary<string, string> environmentVariables = null)
+    public Process StartProcess(string fileName, string arguments = "", string? workingDirectory = null,
+        Dictionary<string, string>? environmentVariables = null)
     {
         ThrowIfDisposed();
 
@@ -138,7 +139,7 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>The started process</returns>
     public async Task<Process> StartProcessAsync(string fileName, string arguments = "",
-        string workingDirectory = null, Dictionary<string, string> environmentVariables = null,
+        string? workingDirectory = null, Dictionary<string, string>? environmentVariables = null,
         CancellationToken cancellationToken = default)
     {
         await _operationSemaphore.WaitAsync(cancellationToken);
@@ -227,8 +228,7 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
     /// <returns>Number of processes successfully terminated</returns>
     public async Task<int> KillAllProcessesAsync(TimeSpan? timeout = null)
     {
-        ThrowIfDisposed();
-
+        // Allow cleanup even during disposal - don't throw ObjectDisposedException
         timeout ??= _options.ProcessKillTimeout;
         var startTime = DateTime.UtcNow;
         var processesToKill = _managedProcesses.Values.ToList();
@@ -326,7 +326,7 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
     /// </summary>
     /// <param name="processId">The process ID</param>
     /// <returns>Process information if found, null otherwise</returns>
-    public ManagedProcessInfo GetProcessInfo(int processId)
+    public ManagedProcessInfo? GetProcessInfo(int processId)
     {
         ThrowIfDisposed();
         return _managedProcesses.TryGetValue(processId, out var processInfo) ? processInfo : null;
@@ -372,7 +372,10 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
     /// </summary>
     public void Dispose()
     {
-        Dispose(true);
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return; // Already disposed
+
+        Dispose(disposing: true);
         GC.SuppressFinalize(this);
     }
 
@@ -381,8 +384,11 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeAsync()
     {
-        await DisposeAsyncCore();
-        Dispose(false);
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return; // Already disposed
+
+        await DisposeAsyncCore().ConfigureAwait(false);
+        DisposeUnmanagedResources();
         GC.SuppressFinalize(this);
     }
 
@@ -392,9 +398,6 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
     /// <param name="disposing">True if disposing managed resources</param>
     protected virtual void Dispose(bool disposing)
     {
-        if (_isDisposed)
-            return;
-
         if (disposing)
         {
             // Dispose managed resources
@@ -404,6 +407,7 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
             try
             {
                 KillAllProcesses();
+                _managedProcesses.Clear(); // Ensure all processes are removed
             }
             catch (Exception ex)
             {
@@ -413,31 +417,25 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
             _operationSemaphore?.Dispose();
         }
 
-        // Dispose unmanaged resources (Windows Job Object)
-        if (_isWindows && _jobHandle != IntPtr.Zero)
-        {
-            NativeMethods.CloseHandle(_jobHandle);
-            _jobHandle = IntPtr.Zero;
-        }
+        // Always dispose unmanaged resources
+        DisposeUnmanagedResources();
 
-        _isDisposed = true;
         LogMessage("ProcessGuardian disposed", LogLevel.Information);
     }
 
     /// <summary>
-    /// Asynchronous disposal core implementation.
+    /// Asynchronous disposal core implementation for managed resources.
     /// </summary>
     protected virtual async ValueTask DisposeAsyncCore()
     {
-        if (_isDisposed)
-            return;
-
+        // Dispose managed resources asynchronously
         UnregisterEventHandlers();
         _cleanupTimer?.Dispose();
 
         try
         {
-            await KillAllProcessesAsync();
+            await KillAllProcessesAsync().ConfigureAwait(false);
+            _managedProcesses.Clear(); // Ensure all processes are removed
         }
         catch (Exception ex)
         {
@@ -445,6 +443,28 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
         }
 
         _operationSemaphore?.Dispose();
+    }
+
+    /// <summary>
+    /// Disposes unmanaged resources (Windows Job Object handle).
+    /// </summary>
+    private void DisposeUnmanagedResources()
+    {
+        if (_jobHandle != IntPtr.Zero)
+        {
+            try
+            {
+                NativeMethods.CloseHandle(_jobHandle);
+            }
+            catch
+            {
+                // Suppress exceptions in disposal to prevent app crash
+            }
+            finally
+            {
+                _jobHandle = IntPtr.Zero;
+            }
+        }
     }
 
     /// <summary>
@@ -459,7 +479,7 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
 
     private void SetupPlatformSpecificProcessManagement(ManagedProcessInfo processInfo)
     {
-        if (_isWindows && _jobHandle != IntPtr.Zero)
+        if (_isWindows && _jobHandle != IntPtr.Zero && !_useManualProcessTracking)
         {
             try
             {
@@ -472,35 +492,27 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
                 else
                 {
                     var error = NativeMethods.GetLastError();
-                    LogMessage($"Failed to assign process {processInfo.Id} to job object. Error: {error}", LogLevel.Warning);
+                    LogMessage($"Failed to assign process {processInfo.Id} to job object (Error: {error}). Using manual tracking for this process.", LogLevel.Warning);
+                    _useManualProcessTracking = true;
                 }
             }
             catch (Exception ex)
             {
+                LogMessage($"Job Object assignment failed for process {processInfo.Id}: {ex.Message}. Using manual tracking.", LogLevel.Warning);
+                _useManualProcessTracking = true;
                 OnProcessError("AssignProcessToJobObject", ex, processInfo.Id);
             }
         }
-        else if (_isUnix && _options.UseProcessGroupsOnUnix)
+        else if (_isUnix)
         {
-            try
-            {
-                // Set process group for better process tree management on Unix
-                var result = NativeMethods.SetProcessGroup(processInfo.Id, 0);
-                if (result == 0)
-                {
-                    processInfo.ProcessGroupId = NativeMethods.GetProcessGroup(processInfo.Id);
-                    OnProcessLifecycleEvent(processInfo, ProcessLifecycleEventType.ProcessGroupAssigned);
-                    LogMessage($"Process {processInfo.Id} assigned to process group {processInfo.ProcessGroupId}", LogLevel.Debug);
-                }
-                else
-                {
-                    LogMessage($"Failed to set process group for process {processInfo.Id}", LogLevel.Warning);
-                }
-            }
-            catch (Exception ex)
-            {
-                OnProcessError("SetProcessGroup", ex, processInfo.Id);
-            }
+            // NOTE: Process groups cannot be set from parent process due to .NET API limitations.
+            // setpgid() must be called from within the child process itself, but .NET does not
+            // provide a pre-spawn hook for this purpose. Manual process tree tracking is used instead.
+            LogMessage($"Using manual process tree tracking for Unix process {processInfo.Id}", LogLevel.Debug);
+        }
+        else if (_isWindows && _useManualProcessTracking)
+        {
+            LogMessage($"Using manual process tree tracking for process {processInfo.Id}", LogLevel.Debug);
         }
     }
 
@@ -519,13 +531,10 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
             {
                 process.CloseMainWindow();
             }
-            else if (_isUnix && processInfo.ProcessGroupId.HasValue)
-            {
-                // Send SIGTERM to the process group
-                NativeMethods.KillProcessGroup(processInfo.ProcessGroupId.Value, NativeMethods.SIGTERM);
-            }
             else
             {
+                // Unix: Attempt graceful termination
+                // Note: Process groups are not used due to .NET API limitations
                 process.CloseMainWindow();
             }
 
@@ -547,15 +556,10 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
             {
                 LogMessage($"Force killing process: {processInfo}", LogLevel.Debug);
 
-                if (_isUnix && processInfo.ProcessGroupId.HasValue)
-                {
-                    // Send SIGKILL to the process group
-                    NativeMethods.KillProcessGroup(processInfo.ProcessGroupId.Value, NativeMethods.SIGKILL);
-                }
-                else
-                {
-                    process.KillProcessTree(entireProcessTree: true);
-                }
+                // Kill the entire process tree
+                // Windows: Uses Job Object (if available) or manual tree enumeration
+                // Unix: Uses Process.Kill with entireProcessTree flag (signals entire tree)
+                process.KillProcessTree(entireProcessTree: true);
 
                 OnProcessLifecycleEvent(processInfo, ProcessLifecycleEventType.ProcessTerminated);
             }
@@ -579,7 +583,9 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
             if (_jobHandle == IntPtr.Zero)
             {
                 var error = NativeMethods.GetLastError();
-                throw new InvalidOperationException($"Failed to create job object. Win32 Error: {error}");
+                LogMessage($"Failed to create job object (Error: {error}). Using manual process tracking.", LogLevel.Warning);
+                _useManualProcessTracking = true;
+                return;
             }
 
             var info = new NativeMethods.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
@@ -601,7 +607,11 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
                     extendedInfoPtr, (uint)infoSize))
                 {
                     var error = NativeMethods.GetLastError();
-                    throw new InvalidOperationException($"Failed to set job object information. Win32 Error: {error}");
+                    LogMessage($"Failed to set job object information (Error: {error}). Using manual process tracking.", LogLevel.Warning);
+                    NativeMethods.CloseHandle(_jobHandle);
+                    _jobHandle = IntPtr.Zero;
+                    _useManualProcessTracking = true;
+                    return;
                 }
 
                 LogMessage("Windows Job Object initialized successfully", LogLevel.Debug);
@@ -613,7 +623,16 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
+            LogMessage($"Job Object initialization failed: {ex.Message}. Using manual process tracking.", LogLevel.Warning);
+            _useManualProcessTracking = true;
             OnProcessError("InitializeWindowsJobObject", ex);
+            
+            if (_jobHandle != IntPtr.Zero)
+            {
+                try { NativeMethods.CloseHandle(_jobHandle); } catch { }
+                _jobHandle = IntPtr.Zero;
+            }
+
             if (_options.ThrowOnProcessOperationFailure)
                 throw;
         }
@@ -621,7 +640,7 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
 
     private void PerformCleanup(object? state)
     {
-        if (_isDisposed)
+        if (_disposed != 0)
             return;
 
         try
@@ -727,7 +746,7 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
 
     private void ThrowIfDisposed()
     {
-        if (_isDisposed)
+        if (_disposed != 0)
             throw new ObjectDisposedException(nameof(ProcessGuardian));
     }
 

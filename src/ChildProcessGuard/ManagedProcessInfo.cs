@@ -93,12 +93,12 @@ public class ManagedProcessInfo
     /// <summary>
     /// The working directory used to start the process
     /// </summary>
-    public string WorkingDirectory { get; private set; }
+    public string? WorkingDirectory { get; private set; }
 
     /// <summary>
     /// Environment variables that were set for the process
     /// </summary>
-    public IReadOnlyDictionary<string, string> EnvironmentVariables { get; private set; }
+    public IReadOnlyDictionary<string, string>? EnvironmentVariables { get; private set; }
 
     /// <summary>
     /// Initializes a new instance of ManagedProcessInfo
@@ -109,7 +109,7 @@ public class ManagedProcessInfo
     /// <param name="workingDirectory">The working directory</param>
     /// <param name="environmentVariables">The environment variables</param>
     public ManagedProcessInfo(Process process, string originalFileName, string originalArguments,
-        string workingDirectory = null, Dictionary<string, string> environmentVariables = null)
+        string? workingDirectory = null, Dictionary<string, string>? environmentVariables = null)
     {
         Process = process ?? throw new ArgumentNullException(nameof(process));
         OriginalFileName = originalFileName ?? throw new ArgumentNullException(nameof(originalFileName));

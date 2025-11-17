@@ -106,6 +106,103 @@ internal static class NativeMethods
     internal const int SIGTERM = 15;
     internal const int SIGKILL = 9;
 
+    // Windows Process APIs for parent PID and process tree enumeration
+    [DllImport("ntdll.dll")]
+    internal static extern int NtQueryInformationProcess(
+        IntPtr processHandle,
+        int processInformationClass,
+        ref PROCESS_BASIC_INFORMATION processInformation,
+        int processInformationLength,
+        out int returnLength);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern IntPtr OpenProcess(
+        ProcessAccessFlags processAccess,
+        bool bInheritHandle,
+        int processId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern bool TerminateProcess(
+        IntPtr hProcess,
+        uint uExitCode);
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    internal static extern IntPtr CreateToolhelp32Snapshot(
+        SnapshotFlags dwFlags,
+        int th32ProcessID);
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    internal static extern bool Process32First(
+        IntPtr hSnapshot,
+        ref PROCESSENTRY32 lppe);
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    internal static extern bool Process32Next(
+        IntPtr hSnapshot,
+        ref PROCESSENTRY32 lppe);
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct PROCESS_BASIC_INFORMATION
+    {
+        public IntPtr Reserved1;
+        public IntPtr PebBaseAddress;
+        public IntPtr Reserved2_0;
+        public IntPtr Reserved2_1;
+        public IntPtr UniqueProcessId;
+        public IntPtr InheritedFromUniqueProcessId;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    internal struct PROCESSENTRY32
+    {
+        private const int MAX_PATH = 260;
+        public uint dwSize;
+        public uint cntUsage;
+        public uint th32ProcessID;
+        public IntPtr th32DefaultHeapID;
+        public uint th32ModuleID;
+        public uint cntThreads;
+        public uint th32ParentProcessID;
+        public int pcPriClassBase;
+        public uint dwFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = MAX_PATH)]
+        public string szExeFile;
+    }
+
+    [Flags]
+    internal enum ProcessAccessFlags : uint
+    {
+        All = 0x001F0FFF,
+        Terminate = 0x00000001,
+        CreateThread = 0x00000002,
+        VirtualMemoryOperation = 0x00000008,
+        VirtualMemoryRead = 0x00000010,
+        VirtualMemoryWrite = 0x00000020,
+        DuplicateHandle = 0x00000040,
+        CreateProcess = 0x000000080,
+        SetQuota = 0x00000100,
+        SetInformation = 0x00000200,
+        QueryInformation = 0x00000400,
+        QueryLimitedInformation = 0x00001000,
+        Synchronize = 0x00100000
+    }
+
+    [Flags]
+    internal enum SnapshotFlags : uint
+    {
+        HeapList = 0x00000001,
+        Process = 0x00000002,
+        Thread = 0x00000004,
+        Module = 0x00000008,
+        Module32 = 0x00000010,
+        Inherit = 0x80000000,
+        All = 0x0000001F,
+        NoHeaps = 0x40000000
+    }
+
+    // ProcessInformationClass for NtQueryInformationProcess
+    internal const int ProcessBasicInformation = 0;
+
     /// <summary>
     /// Gets the last Win32 error code
     /// </summary>

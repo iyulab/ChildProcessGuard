@@ -79,25 +79,24 @@ internal static class CompatibilityExtensions
     }
 
     /// <summary>
-    /// Kills process tree on Windows using taskkill
+    /// Kills process tree on Windows using native ToolHelp32 API
     /// </summary>
     /// <param name="processId">Process ID to kill</param>
     private static void KillProcessTreeWindows(int processId)
     {
         try
         {
-            var startInfo = new ProcessStartInfo
+            // Get all child processes recursively
+            var childProcessIds = GetChildProcessIdsNative(processId);
+            
+            // Kill children first (depth-first)
+            foreach (var childId in childProcessIds)
             {
-                FileName = "taskkill",
-                Arguments = $"/F /T /PID {processId}",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            };
-
-            using var killProcess = Process.Start(startInfo);
-            killProcess?.WaitForExit(5000);
+                KillProcessNative(childId);
+            }
+            
+            // Kill the parent process
+            KillProcessNative(processId);
         }
         catch
         {
@@ -110,6 +109,94 @@ internal static class CompatibilityExtensions
             catch
             {
                 // Process might have already exited
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets child process IDs using native ToolHelp32 API
+    /// </summary>
+    /// <param name="parentId">Parent process ID</param>
+    /// <returns>List of child process IDs</returns>
+    private static List<int> GetChildProcessIdsNative(int parentId)
+    {
+        var childIds = new List<int>();
+        IntPtr snapshot = IntPtr.Zero;
+
+        try
+        {
+            snapshot = NativeMethods.CreateToolhelp32Snapshot(
+                NativeMethods.SnapshotFlags.Process,
+                0);
+
+            if (snapshot == IntPtr.Zero || snapshot == new IntPtr(-1))
+            {
+                return childIds;
+            }
+
+            var entry = new NativeMethods.PROCESSENTRY32
+            {
+                dwSize = (uint)Marshal.SizeOf(typeof(NativeMethods.PROCESSENTRY32))
+            };
+
+            if (!NativeMethods.Process32First(snapshot, ref entry))
+            {
+                return childIds;
+            }
+
+            do
+            {
+                if (entry.th32ParentProcessID == parentId)
+                {
+                    childIds.Add((int)entry.th32ProcessID);
+                    // Recursively get grandchildren
+                    childIds.AddRange(GetChildProcessIdsNative((int)entry.th32ProcessID));
+                }
+            } while (NativeMethods.Process32Next(snapshot, ref entry));
+        }
+        catch
+        {
+            // Return what we have so far
+        }
+        finally
+        {
+            if (snapshot != IntPtr.Zero && snapshot != new IntPtr(-1))
+            {
+                NativeMethods.CloseHandle(snapshot);
+            }
+        }
+
+        return childIds;
+    }
+
+    /// <summary>
+    /// Kills a process using native TerminateProcess API
+    /// </summary>
+    /// <param name="processId">Process ID to kill</param>
+    private static void KillProcessNative(int processId)
+    {
+        IntPtr processHandle = IntPtr.Zero;
+        try
+        {
+            processHandle = NativeMethods.OpenProcess(
+                NativeMethods.ProcessAccessFlags.Terminate,
+                false,
+                processId);
+
+            if (processHandle != IntPtr.Zero)
+            {
+                NativeMethods.TerminateProcess(processHandle, 1);
+            }
+        }
+        catch
+        {
+            // Ignore errors - process may have already exited
+        }
+        finally
+        {
+            if (processHandle != IntPtr.Zero)
+            {
+                NativeMethods.CloseHandle(processHandle);
             }
         }
     }
@@ -173,6 +260,24 @@ internal static class CompatibilityExtensions
     /// <returns>List of child process IDs</returns>
     public static List<int> GetChildProcessIds(int parentId)
     {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return GetChildProcessIdsNative(parentId);
+        }
+        else
+        {
+            // Unix: Use /proc filesystem for better performance
+            return GetChildProcessIdsUnix(parentId);
+        }
+    }
+
+    /// <summary>
+    /// Gets child processes on Unix using /proc filesystem
+    /// </summary>
+    /// <param name="parentId">Parent process ID</param>
+    /// <returns>List of child process IDs</returns>
+    private static List<int> GetChildProcessIdsUnix(int parentId)
+    {
         var childIds = new List<int>();
 
         try
@@ -187,7 +292,7 @@ internal static class CompatibilityExtensions
                     {
                         childIds.Add(process.Id);
                         // Recursively get grandchildren
-                        childIds.AddRange(GetChildProcessIds(process.Id));
+                        childIds.AddRange(GetChildProcessIdsUnix(process.Id));
                     }
                 }
                 catch
@@ -226,43 +331,49 @@ internal static class CompatibilityExtensions
     }
 
     /// <summary>
-    /// Gets parent process ID on Windows using WMI-like approach
+    /// Gets parent process ID on Windows using native NT API
     /// </summary>
     /// <param name="processId">Process ID</param>
     /// <returns>Parent process ID</returns>
     private static int GetParentProcessIdWindows(int processId)
     {
+        IntPtr processHandle = IntPtr.Zero;
         try
         {
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = "wmic",
-                Arguments = $"process where processid={processId} get parentprocessid /format:csv",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                CreateNoWindow = true
-            };
+            processHandle = NativeMethods.OpenProcess(
+                NativeMethods.ProcessAccessFlags.QueryInformation,
+                false,
+                processId);
 
-            using var process = Process.Start(startInfo);
-            var output = process?.StandardOutput.ReadToEnd();
-            process?.WaitForExit();
-
-            if (!string.IsNullOrEmpty(output))
+            if (processHandle == IntPtr.Zero)
             {
-                var lines = output.Split('\n');
-                foreach (var line in lines)
-                {
-                    var parts = line.Split(',');
-                    if (parts.Length >= 2 && int.TryParse(parts[1].Trim(), out var parentId))
-                    {
-                        return parentId;
-                    }
-                }
+                return -1;
+            }
+
+            var pbi = new NativeMethods.PROCESS_BASIC_INFORMATION();
+            int returnLength;
+            int status = NativeMethods.NtQueryInformationProcess(
+                processHandle,
+                NativeMethods.ProcessBasicInformation,
+                ref pbi,
+                Marshal.SizeOf(pbi),
+                out returnLength);
+
+            if (status == 0) // STATUS_SUCCESS
+            {
+                return pbi.InheritedFromUniqueProcessId.ToInt32();
             }
         }
         catch
         {
-            // Ignore errors
+            // Ignore errors - will return -1
+        }
+        finally
+        {
+            if (processHandle != IntPtr.Zero)
+            {
+                NativeMethods.CloseHandle(processHandle);
+            }
         }
 
         return -1;

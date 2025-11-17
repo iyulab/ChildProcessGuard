@@ -1,0 +1,25 @@
+<Project>
+  <PropertyGroup>
+    <!-- Version Information -->
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+
+    <!-- Package Metadata -->
+    <Authors>Your Name</Authors>
+    <Company>Your Company</Company>
+    <Copyright>Copyright © $(Company) $([System.DateTime]::Now.Year)</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/yourusername/ChildProcessGuard</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/yourusername/ChildProcessGuard</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>process;child-process;process-management;cross-platform;windows;linux;unix;dotnet</PackageTags>
+    <PackageReleaseNotes>See CHANGELOG.md for release notes</PackageReleaseNotes>
+
+    <!-- Build Configuration -->
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+</Project>
