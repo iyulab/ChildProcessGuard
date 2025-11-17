@@ -230,23 +230,9 @@ internal static class CompatibilityExtensions
             var pgid = NativeMethods.GetProcessGroup(processId);
             if (pgid > 0)
             {
-                NativeMethods.KillProcessGroup(pgid, NativeMethods.SIGTERM);
-
-                // Wait a bit, then force kill if needed
-                Task.Delay(100).Wait();
-
-                try
-                {
-                    var process = Process.GetProcessById(processId);
-                    if (!process.HasExited)
-                    {
-                        NativeMethods.KillProcessGroup(pgid, NativeMethods.SIGKILL);
-                    }
-                }
-                catch
-                {
-                    // Process might have exited
-                }
+                // Send SIGKILL directly - graceful termination already attempted in TerminateProcessAsync
+                // No delay here to avoid blocking the async flow
+                NativeMethods.KillProcessGroup(pgid, NativeMethods.SIGKILL);
             }
             else
             {
