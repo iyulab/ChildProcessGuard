@@ -107,9 +107,10 @@ public class ProcessGuardianTests : IDisposable
         // Arrange
         _guardian = new ProcessGuardian();
         var executable = GetLongRunningExecutable();
+        var arguments = GetLongRunningArguments();
 
-        var process1 = _guardian.StartProcess(executable);
-        var process2 = _guardian.StartProcess(executable);
+        var process1 = _guardian.StartProcess(executable, arguments);
+        var process2 = _guardian.StartProcess(executable, arguments);
 
         _guardian.ManagedProcessCount.Should().Be(2);
 
