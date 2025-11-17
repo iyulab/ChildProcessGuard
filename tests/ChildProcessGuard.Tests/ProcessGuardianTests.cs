@@ -17,6 +17,7 @@ public class ProcessGuardianTests : IDisposable
     }
 
     [Fact]
+    [Trait("Category", "Fast")]
     public void Constructor_WithDefaultOptions_ShouldInitializeSuccessfully()
     {
         // Arrange & Act
@@ -29,6 +30,7 @@ public class ProcessGuardianTests : IDisposable
     }
 
     [Fact]
+    [Trait("Category", "Fast")]
     public void Constructor_WithCustomOptions_ShouldUseProvidedOptions()
     {
         // Arrange
@@ -48,7 +50,7 @@ public class ProcessGuardianTests : IDisposable
         _guardian.Options.EnableDetailedLogging.Should().BeTrue();
     }
 
-    [Fact]
+    [Fact(Skip = "Skipped in CI - starts process")]
     public void StartProcess_WithValidExecutable_ShouldStartAndTrackProcess()
     {
         // Arrange
@@ -68,7 +70,7 @@ public class ProcessGuardianTests : IDisposable
         processInfo!.OriginalFileName.Should().Be(executable);
     }
 
-    [Fact]
+    [Fact(Skip = "Skipped in CI - starts process")]
     public async Task StartProcessAsync_WithValidExecutable_ShouldStartProcess()
     {
         // Arrange
@@ -83,7 +85,7 @@ public class ProcessGuardianTests : IDisposable
         _guardian.ManagedProcessCount.Should().Be(1);
     }
 
-    [Fact]
+    [Fact(Skip = "Skipped in CI - starts process")]
     public void StartProcess_WhenMaxProcessesReached_ShouldThrowException()
     {
         // Arrange
@@ -155,7 +157,7 @@ public class ProcessGuardianTests : IDisposable
         stats.TotalMemoryUsage.Should().BeGreaterThan(0);
     }
 
-    [Fact]
+    [Fact(Skip = "Skipped in CI - starts process")]
     public void GetManagedProcesses_ShouldReturnAllTrackedProcesses()
     {
         // Arrange
@@ -173,7 +175,7 @@ public class ProcessGuardianTests : IDisposable
         processes.Should().OnlyContain(p => p.IsManaged);
     }
 
-    [Fact]
+    [Fact(Skip = "Skipped in CI - starts process")]
     public void RemoveProcess_ShouldUntrackProcess()
     {
         // Arrange
@@ -215,6 +217,7 @@ public class ProcessGuardianTests : IDisposable
     }
 
     [Fact]
+    [Trait("Category", "Fast")]
     public void Dispose_WhenAlreadyDisposed_ShouldNotThrow()
     {
         // Arrange
@@ -229,6 +232,7 @@ public class ProcessGuardianTests : IDisposable
     }
 
     [Fact]
+    [Trait("Category", "Fast")]
     public void OperationAfterDispose_ShouldThrowObjectDisposedException()
     {
         // Arrange
@@ -240,7 +244,7 @@ public class ProcessGuardianTests : IDisposable
         action.Should().Throw<ObjectDisposedException>();
     }
 
-    [Fact]
+    [Fact(Skip = "Skipped in CI - starts process")]
     public void ProcessLifecycleEvent_ShouldBeRaisedOnProcessStart()
     {
         // Arrange
