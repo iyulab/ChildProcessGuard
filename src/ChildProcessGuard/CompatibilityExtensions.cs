@@ -216,7 +216,7 @@ internal static class CompatibilityExtensions
                 NativeMethods.KillProcessGroup(pgid, NativeMethods.SIGTERM);
 
                 // Wait a bit, then force kill if needed
-                Task.Delay(2000).Wait();
+                Task.Delay(100).Wait();
 
                 try
                 {
