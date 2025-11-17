@@ -102,6 +102,7 @@ public class ProcessGuardianTests : IDisposable
     }
 
     [Fact]
+    [Trait("Category", "LongRunning")]
     public async Task KillAllProcessesAsync_ShouldTerminateAllProcesses()
     {
         // Arrange
@@ -132,6 +133,7 @@ public class ProcessGuardianTests : IDisposable
     }
 
     [Fact]
+    [Trait("Category", "LongRunning")]
     public async Task GetStatistics_ShouldReturnAccurateMetrics()
     {
         // Arrange
@@ -191,6 +193,7 @@ public class ProcessGuardianTests : IDisposable
     }
 
     [Fact]
+    [Trait("Category", "LongRunning")]
     public void Dispose_ShouldTerminateAllProcesses()
     {
         // Arrange
@@ -257,6 +260,7 @@ public class ProcessGuardianTests : IDisposable
     }
 
     [Fact]
+    [Trait("Category", "LongRunning")]
     public async Task ProcessExitedEvent_ShouldBeRaisedWhenProcessEnds()
     {
         // Arrange
