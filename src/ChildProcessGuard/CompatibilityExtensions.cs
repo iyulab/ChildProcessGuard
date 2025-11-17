@@ -27,6 +27,9 @@ internal static class CompatibilityExtensions
             while (!process.HasExited)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
+                // Small delay between checks to avoid excessive CPU usage
+                // Also gives the OS time to reap the process after a kill signal
                 await Task.Delay(50, cancellationToken);
             }
             return;

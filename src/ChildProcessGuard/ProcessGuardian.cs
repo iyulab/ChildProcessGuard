@@ -561,11 +561,15 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
                 // Unix: Uses Process.Kill with entireProcessTree flag (signals entire tree)
                 process.KillProcessTree(entireProcessTree: true);
 
+                // Give the OS a moment to reap the process after SIGKILL
+                // This is especially important on Linux where the process needs to be reaped
+                await Task.Delay(150);
+
                 // Wait for the process to actually exit after force kill
-                // Give it a short time to respond to SIGKILL
                 try
                 {
-                    using var killCts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+                    // Use a shorter timeout since SIGKILL should be immediate
+                    using var killCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
                     await process.WaitForExitAsync(killCts.Token);
                 }
                 catch (OperationCanceledException)
