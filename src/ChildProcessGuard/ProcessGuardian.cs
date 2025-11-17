@@ -561,6 +561,19 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
                 // Unix: Uses Process.Kill with entireProcessTree flag (signals entire tree)
                 process.KillProcessTree(entireProcessTree: true);
 
+                // Wait for the process to actually exit after force kill
+                // Give it a short time to respond to SIGKILL
+                try
+                {
+                    using var killCts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+                    await process.WaitForExitAsync(killCts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Process didn't exit even after SIGKILL - this shouldn't happen
+                    LogMessage($"Process did not exit after force kill: {processInfo}", LogLevel.Warning);
+                }
+
                 OnProcessLifecycleEvent(processInfo, ProcessLifecycleEventType.ProcessTerminated);
             }
         }
