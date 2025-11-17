@@ -115,9 +115,9 @@ public class ProcessGuardianTests : IDisposable
         _guardian.ManagedProcessCount.Should().Be(2);
 
         // Act
-        // Use shorter graceful timeout on Linux to allow time for force kill
-        // Graceful timeout (1s) + force kill time (~700ms) = ~1.7s total
-        var timeout = OperatingSystem.IsLinux() ? TimeSpan.FromSeconds(1) : TimeSpan.FromSeconds(5);
+        // Use very short timeout on Linux since CloseMainWindow doesn't work for command-line processes
+        // Go straight to force kill to avoid wasting time
+        var timeout = OperatingSystem.IsLinux() ? TimeSpan.FromMilliseconds(100) : TimeSpan.FromSeconds(5);
         var terminatedCount = await _guardian.KillAllProcessesAsync(timeout);
 
         // Assert
