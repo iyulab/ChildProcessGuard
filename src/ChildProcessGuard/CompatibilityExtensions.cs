@@ -14,11 +14,25 @@ internal static class CompatibilityExtensions
     /// <param name="process">The process to wait for</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Task that completes when the process exits</returns>
-    public static Task WaitForExitAsync(this Process process, CancellationToken cancellationToken = default)
+    public static async Task WaitForExitAsync(this Process process, CancellationToken cancellationToken = default)
     {
         if (process.HasExited)
-            return Task.CompletedTask;
+            return;
 
+        // On Unix, the Exited event may not fire reliably when processes are killed via signals
+        // Poll HasExited on Unix as a fallback
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            // Poll-based wait for Unix systems
+            while (!process.HasExited)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await Task.Delay(50, cancellationToken);
+            }
+            return;
+        }
+
+        // Event-based wait for Windows
         var tcs = new TaskCompletionSource<bool>();
 
         void ProcessExited(object sender, EventArgs e) => tcs.TrySetResult(true);
@@ -38,7 +52,7 @@ internal static class CompatibilityExtensions
             tcs.TrySetCanceled(cancellationToken);
         });
 
-        return tcs.Task;
+        await tcs.Task;
     }
 
     /// <summary>
