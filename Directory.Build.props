@@ -8,7 +8,7 @@
     <!-- Package Metadata -->
     <Authors>iyulab</Authors>
     <Company>Iyulab Corporation</Company>
-    <Owners>iyulab-rnd</Owners>
+    <Owners>iyulab</Owners>
     <Copyright>Copyright (c) Iyulab Corporation 2025.</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/iyulab/ChildProcessGuard</PackageProjectUrl>
@@ -17,7 +17,7 @@
     <PackageTags>process;childprocess;process-management;cross-platform;dotnet;job-object;process-guardian;process-cleanup;process-monitoring;process-lifecycle</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageIcon>logo.png</PackageIcon>
-    <PackageIconUrl>https://raw.githubusercontent.com/iyulab-rnd/public/main/images/iyulab_128.png</PackageIconUrl>
+    <PackageIconUrl>https://raw.githubusercontent.com/iyulab/public/main/images/iyulab_128.png</PackageIconUrl>
 
     <!-- Build Configuration -->
     <LangVersion>latest</LangVersion>
