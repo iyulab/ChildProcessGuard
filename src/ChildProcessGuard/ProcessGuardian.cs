@@ -785,7 +785,7 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
 
     private void LogMessage(string message, LogLevel level)
     {
-        if (!_options.EnableDetailedLogging && level == LogLevel.Debug)
+        if (!_options.EnableDetailedLogging)
             return;
 
         var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss.fff");

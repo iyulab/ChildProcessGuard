@@ -25,7 +25,6 @@ public static class ProcessGuardianExtensions
         if (guardian == null)
             throw new ArgumentNullException(nameof(guardian));
 
-        var processes = new List<Process>();
         var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
 
         var tasks = processInfos.Select(async startInfo =>
