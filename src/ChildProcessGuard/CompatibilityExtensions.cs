@@ -38,7 +38,7 @@ internal static class CompatibilityExtensions
         // Event-based wait for Windows
         var tcs = new TaskCompletionSource<bool>();
 
-        void ProcessExited(object sender, EventArgs e) => tcs.TrySetResult(true);
+        void ProcessExited(object? sender, EventArgs e) => tcs.TrySetResult(true);
 
         process.EnableRaisingEvents = true;
         process.Exited += ProcessExited;

@@ -364,3 +364,5 @@ FodyWeavers.xsd
 
 # Local
 .serena/
+CLAUDE.md
+tmpclaude-*

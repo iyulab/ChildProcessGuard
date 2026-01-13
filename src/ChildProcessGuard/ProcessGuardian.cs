@@ -182,7 +182,7 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
                 startInfo.FileName,
                 startInfo.Arguments,
                 startInfo.WorkingDirectory,
-                startInfo.Environment.Count > 0 ? new Dictionary<string, string>(startInfo.Environment) : null
+                startInfo.Environment.Count > 0 ? startInfo.Environment.Where(kvp => kvp.Value != null).ToDictionary(kvp => kvp.Key, kvp => kvp.Value!) : null
             );
 
             // Add to managed processes
