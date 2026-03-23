@@ -60,7 +60,7 @@ public class ManagedProcessInfo
             }
             catch (InvalidOperationException)
             {
-                // Process has been disposed
+                // Process has been disposed (includes ObjectDisposedException)
                 return true;
             }
         }

@@ -51,6 +51,11 @@ public class ProcessGuardianOptions
     public bool ThrowOnProcessOperationFailure { get; set; } = false;
 
     /// <summary>
+    /// Custom log action. If null, logs are written to Console.WriteLine when EnableDetailedLogging is true.
+    /// </summary>
+    public Action<string>? LogAction { get; set; }
+
+    /// <summary>
     /// Creates a default configuration
     /// </summary>
     /// <returns>Default ProcessGuardianOptions</returns>
@@ -81,4 +86,23 @@ public class ProcessGuardianOptions
         AutoCleanupDisposedProcesses = true,
         CleanupInterval = TimeSpan.FromSeconds(30)
     };
+
+    /// <summary>
+    /// Creates a deep copy of this options instance
+    /// </summary>
+    /// <returns>A new ProcessGuardianOptions with the same values</returns>
+    public ProcessGuardianOptions Clone()
+    {
+        return new ProcessGuardianOptions
+        {
+            ProcessKillTimeout = this.ProcessKillTimeout,
+            EnableDetailedLogging = this.EnableDetailedLogging,
+            ForceKillOnTimeout = this.ForceKillOnTimeout,
+            MaxManagedProcesses = this.MaxManagedProcesses,
+            AutoCleanupDisposedProcesses = this.AutoCleanupDisposedProcesses,
+            CleanupInterval = this.CleanupInterval,
+            ThrowOnProcessOperationFailure = this.ThrowOnProcessOperationFailure,
+            LogAction = this.LogAction
+        };
+    }
 }

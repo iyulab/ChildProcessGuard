@@ -43,19 +43,22 @@ internal static class CompatibilityExtensions
         process.EnableRaisingEvents = true;
         process.Exited += ProcessExited;
 
-        if (process.HasExited)
+        try
         {
-            tcs.TrySetResult(true);
-        }
+            if (process.HasExited)
+            {
+                tcs.TrySetResult(true);
+            }
 
-        // Handle cancellation
-        cancellationToken.Register(() =>
+            using (cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken)))
+            {
+                await tcs.Task;
+            }
+        }
+        finally
         {
             process.Exited -= ProcessExited;
-            tcs.TrySetCanceled(cancellationToken);
-        });
-
-        await tcs.Task;
+        }
     }
 
     /// <summary>
@@ -65,12 +68,20 @@ internal static class CompatibilityExtensions
     /// <param name="entireProcessTree">Whether to kill the entire process tree</param>
     public static void KillProcessTree(this Process process, bool entireProcessTree = true)
     {
-        if (process.HasExited)
+        try
+        {
+            if (process.HasExited)
+                return;
+        }
+        catch (InvalidOperationException)
+        {
+            // Includes ObjectDisposedException
             return;
+        }
 
         if (!entireProcessTree)
         {
-            process.Kill();
+            try { process.Kill(); } catch { }
             return;
         }
 
@@ -88,9 +99,16 @@ internal static class CompatibilityExtensions
         catch
         {
             // Fallback to simple kill
-            if (!process.HasExited)
+            try
             {
-                process.Kill();
+                if (!process.HasExited)
+                {
+                    process.Kill();
+                }
+            }
+            catch
+            {
+                // Process already exited or disposed
             }
         }
     }
@@ -137,19 +155,16 @@ internal static class CompatibilityExtensions
     /// <returns>List of child process IDs</returns>
     private static List<int> GetChildProcessIdsNative(int parentId)
     {
-        var childIds = new List<int>();
+        var parentChildMap = new Dictionary<int, List<int>>();
         IntPtr snapshot = IntPtr.Zero;
 
         try
         {
             snapshot = NativeMethods.CreateToolhelp32Snapshot(
-                NativeMethods.SnapshotFlags.Process,
-                0);
+                NativeMethods.SnapshotFlags.Process, 0);
 
             if (snapshot == IntPtr.Zero || snapshot == new IntPtr(-1))
-            {
-                return childIds;
-            }
+                return new List<int>();
 
             var entry = new NativeMethods.PROCESSENTRY32
             {
@@ -157,23 +172,23 @@ internal static class CompatibilityExtensions
             };
 
             if (!NativeMethods.Process32First(snapshot, ref entry))
-            {
-                return childIds;
-            }
+                return new List<int>();
 
+            // Build parent-child map from single snapshot
             do
             {
-                if (entry.th32ParentProcessID == parentId)
-                {
-                    childIds.Add((int)entry.th32ProcessID);
-                    // Recursively get grandchildren
-                    childIds.AddRange(GetChildProcessIdsNative((int)entry.th32ProcessID));
-                }
+                var pid = (int)entry.th32ProcessID;
+                var ppid = (int)entry.th32ParentProcessID;
+
+                if (!parentChildMap.ContainsKey(ppid))
+                    parentChildMap[ppid] = new List<int>();
+
+                parentChildMap[ppid].Add(pid);
             } while (NativeMethods.Process32Next(snapshot, ref entry));
         }
         catch
         {
-            // Return what we have so far
+            return new List<int>();
         }
         finally
         {
@@ -183,7 +198,22 @@ internal static class CompatibilityExtensions
             }
         }
 
-        return childIds;
+        // Traverse tree from parentId
+        var result = new List<int>();
+        CollectDescendants(parentId, parentChildMap, result);
+        return result;
+    }
+
+    private static void CollectDescendants(int parentId, Dictionary<int, List<int>> map, List<int> result)
+    {
+        if (!map.TryGetValue(parentId, out var children))
+            return;
+
+        foreach (var childId in children)
+        {
+            result.Add(childId);
+            CollectDescendants(childId, map, result);
+        }
     }
 
     /// <summary>
@@ -395,10 +425,19 @@ internal static class CompatibilityExtensions
             if (File.Exists(statFile))
             {
                 var stat = File.ReadAllText(statFile);
-                var parts = stat.Split(' ');
-                if (parts.Length >= 4 && int.TryParse(parts[3], out var parentId))
+                // The comm field (2nd field) is enclosed in parentheses and can contain
+                // spaces and parentheses. Find the last ')' to skip it safely.
+                var closeParen = stat.LastIndexOf(')');
+                if (closeParen >= 0 && closeParen + 2 < stat.Length)
                 {
-                    return parentId;
+                    // After ')' comes: " state ppid ..."
+                    var rest = stat.Substring(closeParen + 2).TrimStart();
+                    var parts = rest.Split(' ');
+                    // parts[0] = state, parts[1] = ppid
+                    if (parts.Length >= 2 && int.TryParse(parts[1], out var parentId))
+                    {
+                        return parentId;
+                    }
                 }
             }
         }

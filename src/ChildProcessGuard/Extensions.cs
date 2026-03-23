@@ -25,7 +25,7 @@ public static class ProcessGuardianExtensions
         if (guardian == null)
             throw new ArgumentNullException(nameof(guardian));
 
-        var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+        using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
 
         var tasks = processInfos.Select(async startInfo =>
         {
@@ -160,10 +160,16 @@ public static class ProcessGuardianExtensions
 
                     terminatedCount++;
                 }
+
+                guardian.RemoveProcess(processInfo.Process);
             }
             catch (OperationCanceledException)
             {
                 // Process didn't terminate within timeout
+            }
+            catch (InvalidOperationException)
+            {
+                // Process already disposed
             }
             catch (Exception)
             {
@@ -287,6 +293,17 @@ public class ProcessGuardianBuilder
     }
 
     /// <summary>
+    /// Sets a custom log action for process operation logging
+    /// </summary>
+    /// <param name="logAction">Action to handle log messages</param>
+    /// <returns>Builder instance</returns>
+    public ProcessGuardianBuilder WithLogAction(Action<string> logAction)
+    {
+        _options.LogAction = logAction;
+        return this;
+    }
+
+    /// <summary>
     /// Enables or disables throwing exceptions on process operation failures
     /// </summary>
     /// <param name="enabled">Whether to throw on failures</param>
@@ -304,7 +321,7 @@ public class ProcessGuardianBuilder
     /// <returns>Builder instance</returns>
     public ProcessGuardianBuilder WithOptions(ProcessGuardianOptions options)
     {
-        _options = options ?? throw new ArgumentNullException(nameof(options));
+        _options = options?.Clone() ?? throw new ArgumentNullException(nameof(options));
         return this;
     }
 

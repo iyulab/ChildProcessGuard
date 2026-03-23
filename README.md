@@ -11,21 +11,27 @@ A cross-platform .NET library that ensures child processes automatically termina
 
 - **Cross-Platform Support**: Works on Windows, Linux, and macOS
 - **Automatic Cleanup**: Child processes terminate when the parent exits
-- **Windows Job Objects**: Uses Job Objects for process management on Windows
-- **Unix Process Groups**: Uses process groups on Unix systems
-- **Process Tree Termination**: Terminates all descendant processes
+- **Windows Job Objects**: Uses Job Objects for kernel-level process management on Windows
+- **Process Tree Termination**: Terminates all descendant processes via native APIs
 - **Async/Await Support**: Full asynchronous API with cancellation tokens
 - **Process Monitoring**: Real-time statistics and lifecycle events
 - **Batch Processing**: Start multiple processes with concurrency control
 - **Thread-Safe**: Supports concurrent operations
 - **Graceful Shutdown**: Configurable timeout and fallback mechanisms
+- **Custom Logging**: Pluggable log action delegate
 
 ## Requirements
 
-- .NET Standard 2.0
-- .NET Standard 2.1
+- .NET Standard 2.0+ / .NET Framework 4.6.1+ / .NET Core 2.0+ / .NET 5+
 - .NET 10.0+
-- .NET Framework 4.6.1+ / .NET Core 2.0+ / .NET 5+
+
+### Supported Runtimes
+
+| Target Framework | Status |
+|---|---|
+| `netstandard2.0` | Supported |
+| `netstandard2.1` | Supported |
+| `net10.0` | Supported |
 
 ## Installation
 
@@ -181,6 +187,24 @@ int killed = await guardian.TerminateProcessesWhere(
 );
 ```
 
+### Custom Logging
+
+```csharp
+// Route logs to your logging framework
+using var guardian = new ProcessGuardianBuilder()
+    .WithDetailedLogging(true)
+    .WithLogAction(message => logger.LogInformation(message))
+    .Build();
+
+// Or use options directly
+var options = new ProcessGuardianOptions
+{
+    EnableDetailedLogging = true,
+    LogAction = message => Debug.WriteLine(message)
+};
+using var guardian = new ProcessGuardian(options);
+```
+
 ### Cross-Platform Example
 
 ```csharp
@@ -216,8 +240,8 @@ var options = new ProcessGuardianOptions
     MaxManagedProcesses = 100,                          // Maximum concurrent processes
     AutoCleanupDisposedProcesses = true,                // Auto cleanup exited processes
     CleanupInterval = TimeSpan.FromMinutes(5),          // Cleanup check interval
-    UseProcessGroupsOnUnix = true,                      // Use process groups on Unix
-    ThrowOnProcessOperationFailure = false              // Exception handling behavior
+    ThrowOnProcessOperationFailure = false,             // Exception handling behavior
+    LogAction = msg => Console.WriteLine(msg)           // Custom log handler (optional)
 };
 
 using var guardian = new ProcessGuardian(options);
@@ -227,16 +251,17 @@ using var guardian = new ProcessGuardian(options);
 
 ```csharp
 // High performance configuration
-using var guardian = ProcessGuardianBuilder.HighPerformance().Build();
+using var highPerf = ProcessGuardianBuilder.HighPerformance().Build();
 
 // Debug configuration with detailed logging
-using var guardian = ProcessGuardianBuilder.Debug().Build();
+using var debug = ProcessGuardianBuilder.Debug().Build();
 
 // Custom configuration
-using var guardian = ProcessGuardianBuilder.Default
+using var custom = new ProcessGuardianBuilder()
     .WithKillTimeout(TimeSpan.FromSeconds(15))
     .WithMaxProcesses(200)
     .WithDetailedLogging(true)
+    .WithLogAction(msg => myLogger.Log(msg))
     .Build();
 ```
 
@@ -244,18 +269,19 @@ using var guardian = ProcessGuardianBuilder.Default
 
 ### Windows Implementation
 - Uses Windows Job Objects with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` flag
-- Automatically terminates all child processes when the job is closed
+- Automatically terminates all child processes when the job handle is closed
 - Kernel-level guarantee for process cleanup
+- Per-process Job Object assignment tracking with graceful fallback
 
 ### Unix Implementation (Linux/macOS)
-- Creates process groups using `setpgid()` system call
+- Uses manual process tree tracking via `/proc` filesystem (Linux) and native APIs
 - Uses `SIGTERM` for graceful termination, `SIGKILL` for force termination
-- Terminates entire process groups to ensure all descendants are cleaned up
+- Enumerates and terminates descendant processes using process tree walking
 
 ### Cross-Platform Failsafes
 - Hooks into `AppDomain.ProcessExit` and `ConsoleCancelKeyPress` events
 - Falls back to basic process termination if advanced features fail
-- Provides .NET 5+ features for .NET Standard 2.1 compatibility
+- Provides .NET 5+ features (e.g., `WaitForExitAsync`) for .NET Standard 2.0/2.1 compatibility
 
 ## Best Practices
 
@@ -263,8 +289,9 @@ using var guardian = ProcessGuardianBuilder.Default
 2. **Configure appropriate timeouts** based on process characteristics
 3. **Handle events** for production applications to track errors
 4. **Use builder pattern** for complex configurations
-5. **Monitor statistics** in long-running applications
-6. **Test cross-platform behavior** when targeting multiple operating systems
+5. **Use `LogAction`** to route logs to your logging framework instead of relying on `Console.WriteLine`
+6. **Monitor statistics** in long-running applications
+7. **Test cross-platform behavior** when targeting multiple operating systems
 
 ## License
 

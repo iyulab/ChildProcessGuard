@@ -204,15 +204,6 @@ internal static class NativeMethods
     internal const int ProcessBasicInformation = 0;
 
     /// <summary>
-    /// Gets the last Win32 error code
-    /// </summary>
-    /// <returns>The error code</returns>
-    internal static int GetLastError()
-    {
-        return Marshal.GetLastWin32Error();
-    }
-
-    /// <summary>
     /// Checks if the current platform supports Unix system calls
     /// </summary>
     /// <returns>True if Unix system calls are supported</returns>

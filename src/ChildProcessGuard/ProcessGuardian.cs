@@ -18,8 +18,7 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
     private int _disposed = 0; // 0 = not disposed, 1 = disposed (thread-safe)
     private readonly bool _isWindows;
     private readonly bool _isUnix;
-    private readonly SemaphoreSlim _operationSemaphore;
-    private bool _useManualProcessTracking = false; // Fallback when Job Object fails
+
 
     /// <summary>
     /// Event raised when a process error occurs
@@ -67,8 +66,6 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
         _isUnix = NativeMethods.IsUnixPlatform();
-        _operationSemaphore = new SemaphoreSlim(_options.MaxManagedProcesses, _options.MaxManagedProcesses);
-
         // Register process exit event handler
         AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
         Console.CancelKeyPress += OnCancelKeyPress;
@@ -142,15 +139,8 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
         string? workingDirectory = null, Dictionary<string, string>? environmentVariables = null,
         CancellationToken cancellationToken = default)
     {
-        await _operationSemaphore.WaitAsync(cancellationToken);
-        try
-        {
-            return StartProcess(fileName, arguments, workingDirectory, environmentVariables);
-        }
-        finally
-        {
-            _operationSemaphore.Release();
-        }
+        cancellationToken.ThrowIfCancellationRequested();
+        return await Task.Run(() => StartProcess(fileName, arguments, workingDirectory, environmentVariables), cancellationToken);
     }
 
     /// <summary>
@@ -213,11 +203,7 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
             }
 
             OnProcessError("StartProcess", ex);
-
-            if (_options.ThrowOnProcessOperationFailure)
-                throw;
-
-            throw new InvalidOperationException($"Failed to start process: {ex.Message}", ex);
+            throw; // Always throw on start failure — caller cannot proceed without a process
         }
     }
 
@@ -355,16 +341,15 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
         var exitedCount = processes.Count(p => p.HasExited);
         var totalMemoryUsage = GetTotalMemoryUsage(processes);
 
-        return new ProcessStatistics
-        {
-            TotalProcesses = processes.Count,
-            RunningProcesses = runningCount,
-            ExitedProcesses = exitedCount,
-            TotalMemoryUsage = totalMemoryUsage,
-            AverageRuntime = processes.Count > 0 ?
+        return new ProcessStatistics(
+            totalProcesses: processes.Count,
+            runningProcesses: runningCount,
+            exitedProcesses: exitedCount,
+            totalMemoryUsage: totalMemoryUsage,
+            averageRuntime: processes.Count > 0 ?
                 TimeSpan.FromTicks((long)processes.Average(p => p.GetRuntime().Ticks)) :
                 TimeSpan.Zero
-        };
+        );
     }
 
     /// <summary>
@@ -414,7 +399,6 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
                 OnProcessError("Dispose", ex);
             }
 
-            _operationSemaphore?.Dispose();
         }
 
         // Always dispose unmanaged resources
@@ -441,8 +425,6 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
         {
             OnProcessError("DisposeAsync", ex);
         }
-
-        _operationSemaphore?.Dispose();
     }
 
     /// <summary>
@@ -479,7 +461,7 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
 
     private void SetupPlatformSpecificProcessManagement(ManagedProcessInfo processInfo)
     {
-        if (_isWindows && _jobHandle != IntPtr.Zero && !_useManualProcessTracking)
+        if (_isWindows && _jobHandle != IntPtr.Zero)
         {
             try
             {
@@ -491,28 +473,19 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
                 }
                 else
                 {
-                    var error = NativeMethods.GetLastError();
+                    var error = Marshal.GetLastWin32Error();
                     LogMessage($"Failed to assign process {processInfo.Id} to job object (Error: {error}). Using manual tracking for this process.", LogLevel.Warning);
-                    _useManualProcessTracking = true;
                 }
             }
             catch (Exception ex)
             {
                 LogMessage($"Job Object assignment failed for process {processInfo.Id}: {ex.Message}. Using manual tracking.", LogLevel.Warning);
-                _useManualProcessTracking = true;
                 OnProcessError("AssignProcessToJobObject", ex, processInfo.Id);
             }
         }
         else if (_isUnix)
         {
-            // NOTE: Process groups cannot be set from parent process due to .NET API limitations.
-            // setpgid() must be called from within the child process itself, but .NET does not
-            // provide a pre-spawn hook for this purpose. Manual process tree tracking is used instead.
             LogMessage($"Using manual process tree tracking for Unix process {processInfo.Id}", LogLevel.Debug);
-        }
-        else if (_isWindows && _useManualProcessTracking)
-        {
-            LogMessage($"Using manual process tree tracking for process {processInfo.Id}", LogLevel.Debug);
         }
     }
 
@@ -527,15 +500,15 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
             LogMessage($"Terminating process: {processInfo}", LogLevel.Debug);
 
             // Try graceful termination first
-            if (_isWindows)
+            try
             {
                 process.CloseMainWindow();
             }
-            else
+            catch (InvalidOperationException)
             {
-                // Unix: Attempt graceful termination
-                // Note: Process groups are not used due to .NET API limitations
-                process.CloseMainWindow();
+                // Process exited between HasExited check and CloseMainWindow
+                OnProcessLifecycleEvent(processInfo, ProcessLifecycleEventType.ProcessExited);
+                return;
             }
 
             // Wait for graceful termination
@@ -552,29 +525,32 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
             }
 
             // Force termination if graceful termination failed
-            if (_options.ForceKillOnTimeout && !process.HasExited)
+            if (_options.ForceKillOnTimeout && !processInfo.HasExited)
             {
                 LogMessage($"Force killing process: {processInfo}", LogLevel.Debug);
 
-                // Kill the entire process tree
-                // Windows: Uses Job Object (if available) or manual tree enumeration
-                // Unix: Uses Process.Kill with entireProcessTree flag (signals entire tree)
-                process.KillProcessTree(entireProcessTree: true);
+                try
+                {
+                    process.KillProcessTree(entireProcessTree: true);
+                }
+                catch (InvalidOperationException)
+                {
+                    // Process already exited
+                    OnProcessLifecycleEvent(processInfo, ProcessLifecycleEventType.ProcessExited);
+                    return;
+                }
 
                 // Give the OS a moment to reap the process after SIGKILL
-                // This is especially important on Linux where the process needs to be reaped
                 await Task.Delay(150);
 
                 // Wait for the process to actually exit after force kill
                 try
                 {
-                    // Use a shorter timeout since SIGKILL should be immediate
                     using var killCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
                     await process.WaitForExitAsync(killCts.Token);
                 }
                 catch (OperationCanceledException)
                 {
-                    // Process didn't exit even after SIGKILL - this shouldn't happen
                     LogMessage($"Process did not exit after force kill: {processInfo}", LogLevel.Warning);
                 }
 
@@ -599,9 +575,8 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
 
             if (_jobHandle == IntPtr.Zero)
             {
-                var error = NativeMethods.GetLastError();
+                var error = Marshal.GetLastWin32Error();
                 LogMessage($"Failed to create job object (Error: {error}). Using manual process tracking.", LogLevel.Warning);
-                _useManualProcessTracking = true;
                 return;
             }
 
@@ -623,11 +598,10 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
                     NativeMethods.JobObjectInfoType.ExtendedLimitInformation,
                     extendedInfoPtr, (uint)infoSize))
                 {
-                    var error = NativeMethods.GetLastError();
+                    var error = Marshal.GetLastWin32Error();
                     LogMessage($"Failed to set job object information (Error: {error}). Using manual process tracking.", LogLevel.Warning);
                     NativeMethods.CloseHandle(_jobHandle);
                     _jobHandle = IntPtr.Zero;
-                    _useManualProcessTracking = true;
                     return;
                 }
 
@@ -641,7 +615,6 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
         catch (Exception ex)
         {
             LogMessage($"Job Object initialization failed: {ex.Message}. Using manual process tracking.", LogLevel.Warning);
-            _useManualProcessTracking = true;
             OnProcessError("InitializeWindowsJobObject", ex);
             
             if (_jobHandle != IntPtr.Zero)
@@ -790,7 +763,16 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
 
         var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss.fff");
         var logLevel = level.ToString().ToUpperInvariant();
-        Console.WriteLine($"[{timestamp}] [{logLevel}] ProcessGuardian: {message}");
+        var formattedMessage = $"[{timestamp}] [{logLevel}] ProcessGuardian: {message}";
+
+        if (_options.LogAction != null)
+        {
+            _options.LogAction(formattedMessage);
+        }
+        else
+        {
+            Console.WriteLine(formattedMessage);
+        }
     }
 
     #endregion
@@ -804,27 +786,40 @@ public class ProcessStatistics
     /// <summary>
     /// Total number of managed processes
     /// </summary>
-    public int TotalProcesses { get; set; }
+    public int TotalProcesses { get; }
 
     /// <summary>
     /// Number of currently running processes
     /// </summary>
-    public int RunningProcesses { get; set; }
+    public int RunningProcesses { get; }
 
     /// <summary>
     /// Number of exited processes
     /// </summary>
-    public int ExitedProcesses { get; set; }
+    public int ExitedProcesses { get; }
 
     /// <summary>
     /// Total memory usage of all running processes
     /// </summary>
-    public long TotalMemoryUsage { get; set; }
+    public long TotalMemoryUsage { get; }
 
     /// <summary>
     /// Average runtime of all processes
     /// </summary>
-    public TimeSpan AverageRuntime { get; set; }
+    public TimeSpan AverageRuntime { get; }
+
+    /// <summary>
+    /// Initializes a new instance of ProcessStatistics
+    /// </summary>
+    public ProcessStatistics(int totalProcesses, int runningProcesses, int exitedProcesses,
+        long totalMemoryUsage, TimeSpan averageRuntime)
+    {
+        TotalProcesses = totalProcesses;
+        RunningProcesses = runningProcesses;
+        ExitedProcesses = exitedProcesses;
+        TotalMemoryUsage = totalMemoryUsage;
+        AverageRuntime = averageRuntime;
+    }
 }
 
 /// <summary>
