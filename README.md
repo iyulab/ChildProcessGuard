@@ -22,9 +22,9 @@ A cross-platform .NET library that ensures child processes automatically termina
 
 ## Requirements
 
+- .NET Standard 2.0
 - .NET Standard 2.1
 - .NET 10.0+
-- .NET Framework 4.7.2+ / .NET Core 2.1+ / .NET 5+
 
 ## Installation
 
