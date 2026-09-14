@@ -16,12 +16,14 @@ env:
   TEST_PATH: 'tests/ChildProcessGuard.Tests/ChildProcessGuard.Tests.csproj'
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  build-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v7
-      with:
-        fetch-depth: 0
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v6
@@ -30,50 +32,70 @@ jobs:
           9.0.x
           10.0.x
 
+    - name: Restore dependencies
+      run: dotnet restore ${{ env.TEST_PATH }}
+
+    # Builds every library target (the test project only pulls in the ones it references).
+    - name: Build library
+      run: dotnet build ${{ env.PROJECT_PATH }} --configuration Release
+
+    - name: Build tests
+      run: dotnet build ${{ env.TEST_PATH }} --configuration Release --no-restore
+
+    # The whole suite runs here, including tests that start real child processes and the
+    # platform-specific tests, so both termination paths are exercised on their own OS.
+    - name: Test
+      run: dotnet test ${{ env.TEST_PATH }} --configuration Release --no-build --verbosity normal
+
+  publish:
+    needs: build-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v6
+      with:
+        dotnet-version: 10.0.x
+
     - name: Extract version from Directory.Build.props
       id: get_version
       run: |
         VERSION=$(grep -oP '<Version>\K[^<]+' Directory.Build.props)
         echo "version=$VERSION" >> $GITHUB_OUTPUT
-        echo "📦 Package Version: $VERSION"
+        echo "Package version: $VERSION"
 
     - name: Check if version tag exists
       id: check_tag
       run: |
         if git rev-parse "v${{ steps.get_version.outputs.version }}" >/dev/null 2>&1; then
           echo "exists=true" >> $GITHUB_OUTPUT
-          echo "⚠️ Tag v${{ steps.get_version.outputs.version }} already exists"
+          echo "Tag v${{ steps.get_version.outputs.version }} already exists; nothing to publish"
         else
           echo "exists=false" >> $GITHUB_OUTPUT
-          echo "✅ Tag v${{ steps.get_version.outputs.version }} is new"
         fi
 
-    - name: Restore dependencies
-      run: dotnet restore ${{ env.PROJECT_PATH }}
-
-    - name: Build
-      run: dotnet build ${{ env.PROJECT_PATH }} --configuration Release --no-restore
-
-    - name: Test
-      run: dotnet test ${{ env.TEST_PATH }} --configuration Release --verbosity normal --filter "Category=Fast"
-
     - name: Pack
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.check_tag.outputs.exists == 'false'
-      run: |
-        dotnet pack ${{ env.PROJECT_PATH }} --configuration Release --no-build --output nupkg
-        echo "📦 Created package with version ${{ steps.get_version.outputs.version }}"
+      if: steps.check_tag.outputs.exists == 'false'
+      run: dotnet pack ${{ env.PROJECT_PATH }} --configuration Release --output nupkg
 
+    # Publish before tagging: a failed push must not leave a tag behind, or every later run
+    # would skip publishing for this version.
     - name: Push to NuGet
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.check_tag.outputs.exists == 'false'
+      if: steps.check_tag.outputs.exists == 'false'
       run: |
         dotnet nuget push ./nupkg/*.nupkg \
           --source https://api.nuget.org/v3/index.json \
           --api-key ${{ secrets.NUGET_API_KEY }} \
           --skip-duplicate
-        echo "✅ Published version ${{ steps.get_version.outputs.version }} to NuGet"
 
     - name: Create Git Tag
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.check_tag.outputs.exists == 'false'
+      if: steps.check_tag.outputs.exists == 'false'
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -81,20 +103,14 @@ jobs:
         git push origin "v${{ steps.get_version.outputs.version }}"
 
     - name: Create GitHub Release
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.check_tag.outputs.exists == 'false'
+      if: steps.check_tag.outputs.exists == 'false'
       uses: softprops/action-gh-release@v3
       with:
         tag_name: v${{ steps.get_version.outputs.version }}
         name: Release v${{ steps.get_version.outputs.version }}
         body: |
-          ## Release Notes
-
-          Version ${{ steps.get_version.outputs.version }} of ChildProcessGuard has been released.
-
-          ### Changes
           See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
 
-          ### Installation
           ```bash
           dotnet add package ChildProcessGuard --version ${{ steps.get_version.outputs.version }}
           ```
