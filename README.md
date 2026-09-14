@@ -302,7 +302,7 @@ using var custom = new ProcessGuardianBuilder()
 
 ### Termination Sequence
 
-`KillAllProcesses`, `TerminateProcessesWhere`, and `Dispose` terminate each managed process in two stages:
+`KillAllProcesses` and `Dispose` terminate each managed process in two stages (`TerminateProcessesWhere` goes straight to the forced stage):
 
 1. **Graceful request.** Unix: `SIGTERM` to the process and its descendants. Windows: a close message to the process's main window (`CloseMainWindow`). If no request can be delivered — a Windows console process has no window — this stage is skipped rather than waited on.
 2. **Wait, then force.** If a request was delivered, the guardian waits up to `ProcessKillTimeout` (default 30 s) for the process to exit. If it is still running, or no request could be delivered, and `ForceKillOnTimeout` is `true` (default), the process tree is killed (`SIGKILL` on Unix, `TerminateProcess` on Windows). With `ForceKillOnTimeout = false` the process is left running after the graceful stage.
