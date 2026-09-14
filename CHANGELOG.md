@@ -19,6 +19,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Added
 - `RemoveProcess(int processId)` overload.
 - `net8.0` target, so .NET 8 and .NET 9 consumers get the runtime's own process-tree termination instead of the .NET Standard polyfill.
+- The test suite now also runs on .NET Framework 4.8 (Windows), exercising the `netstandard2.0` build.
 
 ### Known limitations
 - The .NET Standard builds enumerate descendants through `/proc`, so on macOS they can only terminate the child itself, not its descendants. Consumers on .NET 8 or later are not affected.

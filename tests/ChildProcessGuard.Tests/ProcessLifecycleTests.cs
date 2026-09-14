@@ -36,7 +36,7 @@ public class ProcessLifecycleTests : IDisposable
         return new ManagedProcessInfo(process, "self", string.Empty);
     }
 
-    private static ProcessStartInfo ShortLivedChild() => OperatingSystem.IsWindows()
+    private static ProcessStartInfo ShortLivedChild() => TestPlatform.IsWindows
         ? new ProcessStartInfo("cmd.exe", "/c exit 0") { UseShellExecute = false, CreateNoWindow = true }
         : new ProcessStartInfo("/bin/sh", "-c \"exit 0\"") { UseShellExecute = false };
 

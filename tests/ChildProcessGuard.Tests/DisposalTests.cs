@@ -16,8 +16,8 @@ public class DisposalTests
         var guardian = new ProcessGuardian();
         var executable = GetLongRunningExecutable();
 
-        var process1 = guardian.StartProcess(executable);
-        var process2 = guardian.StartProcess(executable);
+        var process1 = guardian.StartProcess(executable, GetLongRunningArguments());
+        var process2 = guardian.StartProcess(executable, GetLongRunningArguments());
 
         var pid1 = process1.Id;
         var pid2 = process2.Id;
@@ -43,8 +43,8 @@ public class DisposalTests
         var guardian = new ProcessGuardian();
         var executable = GetLongRunningExecutable();
 
-        guardian.StartProcess(executable);
-        guardian.StartProcess(executable);
+        guardian.StartProcess(executable, GetLongRunningArguments());
+        guardian.StartProcess(executable, GetLongRunningArguments());
 
         // Act
         await guardian.DisposeAsync();
@@ -134,8 +134,8 @@ public class DisposalTests
         };
         var guardian = new ProcessGuardian(options);
 
-        guardian.StartProcess(GetLongRunningExecutable());
-        guardian.StartProcess(GetLongRunningExecutable());
+        guardian.StartProcess(GetLongRunningExecutable(), GetLongRunningArguments());
+        guardian.StartProcess(GetLongRunningExecutable(), GetLongRunningArguments());
 
         // Act
         var disposeTask = Task.Run(() => guardian.Dispose());
@@ -178,7 +178,7 @@ public class DisposalTests
         var guardian = new ProcessGuardian(options);
 
         // Start and let a process exit
-        var process = guardian.StartProcess(GetShortLivedExecutable());
+        var process = guardian.StartProcess(GetShortLivedExecutable(), GetShortLivedArguments());
         await Task.Delay(500); // Wait for process to exit
 
         // Act
@@ -231,12 +231,17 @@ public class DisposalTests
 
     private static string GetTestExecutable()
     {
-        return OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/echo";
+        return TestPlatform.IsWindows ? "cmd.exe" : "/bin/echo";
     }
 
     private static string GetTestArguments()
     {
-        return OperatingSystem.IsWindows() ? "/c echo test" : "test";
+        return TestPlatform.IsWindows ? "/c echo test" : "test";
+    }
+
+    private static string GetShortLivedArguments()
+    {
+        return TestPlatform.IsWindows ? "/c exit 0" : "";
     }
 
     private static ProcessStartInfo GetTestProcessStartInfo()
@@ -252,12 +257,12 @@ public class DisposalTests
 
     private static string GetLongRunningExecutable()
     {
-        return OperatingSystem.IsWindows() ? "ping" : "/bin/sleep";
+        return TestPlatform.IsWindows ? "ping" : "/bin/sleep";
     }
 
     private static string GetLongRunningArguments()
     {
-        return OperatingSystem.IsWindows() ? "localhost -n 100" : "60";
+        return TestPlatform.IsWindows ? "localhost -n 30" : "30";
     }
 
     private static ProcessStartInfo GetLongRunningProcessStartInfo()
@@ -273,7 +278,7 @@ public class DisposalTests
 
     private static string GetShortLivedExecutable()
     {
-        return OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/echo";
+        return TestPlatform.IsWindows ? "cmd.exe" : "/bin/echo";
     }
 
     private static bool IsProcessRunning(int processId)
@@ -292,7 +297,7 @@ public class DisposalTests
     private static void CreateAndAbandonGuardian()
     {
         var guardian = new ProcessGuardian();
-        guardian.StartProcess(GetTestExecutable());
+        guardian.StartProcess(GetLongRunningExecutable(), GetLongRunningArguments());
         // Intentionally not disposing - let finalizer handle it
     }
 

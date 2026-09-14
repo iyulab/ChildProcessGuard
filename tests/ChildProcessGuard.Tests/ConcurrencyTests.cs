@@ -26,11 +26,11 @@ public class ConcurrencyTests : IDisposable
             MaxManagedProcesses = 50
         };
         _guardian = new ProcessGuardian(options);
-        var executable = GetTestExecutable();
+        var executable = GetLongRunningExecutable();
 
         // Act
         var tasks = Enumerable.Range(0, 20)
-            .Select(_ => Task.Run(() => _guardian.StartProcess(executable, GetTestArguments())))
+            .Select(_ => Task.Run(() => _guardian.StartProcess(executable, GetLongRunningArguments())))
             .ToArray();
 
         var processes = await Task.WhenAll(tasks);
@@ -105,7 +105,7 @@ public class ConcurrencyTests : IDisposable
             {
                 try
                 {
-                    _guardian.StartProcess(executable);
+                    _guardian.StartProcess(executable, GetTestArguments());
                     await Task.Delay(50);
                 }
                 catch (Exception ex)
@@ -126,7 +126,7 @@ public class ConcurrencyTests : IDisposable
     {
         // Arrange
         _guardian = new ProcessGuardian();
-        _guardian.StartProcess(GetTestExecutable());
+        _guardian.StartProcess(GetTestExecutable(), GetTestArguments());
 
         // Act - Dispose from multiple threads
         var disposeTasks = Enumerable.Range(0, 10)
@@ -160,7 +160,7 @@ public class ConcurrencyTests : IDisposable
 
         // Act
         Func<Task> act = async () =>
-            await _guardian.StartProcessAsync(GetTestExecutable(), cancellationToken: cts.Token);
+            await _guardian.StartProcessAsync(GetTestExecutable(), GetTestArguments(), cancellationToken: cts.Token);
 
         // Assert
         await act.Should().ThrowAsync<OperationCanceledException>();
@@ -193,7 +193,7 @@ public class ConcurrencyTests : IDisposable
 
                 try
                 {
-                    var process = await _guardian.StartProcessAsync(executable);
+                    var process = await _guardian.StartProcessAsync(executable, GetTestArguments());
                     await Task.Delay(10);
                     return process;
                 }
@@ -219,11 +219,11 @@ public class ConcurrencyTests : IDisposable
     {
         // Arrange
         _guardian = new ProcessGuardian();
-        var executable = GetTestExecutable();
+        var executable = GetLongRunningExecutable();
 
         for (int i = 0; i < 10; i++)
         {
-            _guardian.StartProcess(executable);
+            _guardian.StartProcess(executable, GetLongRunningArguments());
         }
 
         var errors = new ConcurrentBag<Exception>();
@@ -275,12 +275,12 @@ public class ConcurrencyTests : IDisposable
 
     private static string GetTestExecutable()
     {
-        return OperatingSystem.IsWindows() ? "ping" : "/bin/sleep";
+        return TestPlatform.IsWindows ? "cmd.exe" : "/bin/sh";
     }
 
     private static string GetTestArguments()
     {
-        return OperatingSystem.IsWindows() ? "localhost -n 30" : "30";
+        return TestPlatform.IsWindows ? "/c exit 0" : "-c \"exit 0\"";
     }
 
     private static ProcessStartInfo GetTestProcessStartInfo()
@@ -296,12 +296,12 @@ public class ConcurrencyTests : IDisposable
 
     private static string GetLongRunningExecutable()
     {
-        return OperatingSystem.IsWindows() ? "ping" : "/bin/sleep";
+        return TestPlatform.IsWindows ? "ping" : "/bin/sleep";
     }
 
     private static string GetLongRunningArguments()
     {
-        return OperatingSystem.IsWindows() ? "localhost -n 30" : "30";
+        return TestPlatform.IsWindows ? "localhost -n 30" : "30";
     }
 
     private static ProcessStartInfo GetLongRunningProcessStartInfo()

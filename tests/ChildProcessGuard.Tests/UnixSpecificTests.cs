@@ -1,3 +1,6 @@
+// These tests only run on Unix; the .NET Framework test target is Windows-only and lacks
+// ProcessStartInfo.ArgumentList, so the whole class is excluded there.
+#if !NETFRAMEWORK
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using FluentAssertions;
@@ -149,13 +152,14 @@ public class UnixSpecificTests : IDisposable
         _guardian = new ProcessGuardian();
         var workingDir = "/tmp";
 
-        // Act
-        var process = _guardian.StartProcess("/bin/pwd", "", workingDir);
+        // Act - a long-running child, so it is still tracked when the info is read
+        var process = _guardian.StartProcess("/bin/sleep", "30", workingDir);
 
         // Assert
         process.Should().NotBeNull();
 
         var processInfo = _guardian.GetProcessInfo(process.Id);
+        processInfo.Should().NotBeNull();
         processInfo!.WorkingDirectory.Should().Be(workingDir);
     }
 
@@ -171,11 +175,12 @@ public class UnixSpecificTests : IDisposable
             { "TEST_VAR", "test_value" }
         };
 
-        // Act
-        var process = _guardian.StartProcess("/bin/env", "", null, envVars);
+        // Act - a long-running child, so it is still tracked when the info is read
+        var process = _guardian.StartProcess("/bin/sleep", "30", null, envVars);
 
         // Assert
         var processInfo = _guardian.GetProcessInfo(process.Id);
+        processInfo.Should().NotBeNull();
         processInfo!.EnvironmentVariables.Should().ContainKey("TEST_VAR");
         processInfo.EnvironmentVariables!["TEST_VAR"].Should().Be("test_value");
     }
@@ -232,3 +237,4 @@ public class UnixSpecificTests : IDisposable
         return _guardian!.StartProcessWithStartInfo(startInfo);
     }
 }
+#endif

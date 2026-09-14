@@ -126,7 +126,7 @@ public class ProcessGuardianTests : IDisposable
         // Act
         // Use very short timeout on Linux since CloseMainWindow doesn't work for command-line processes
         // Go straight to force kill to avoid wasting time
-        var timeout = OperatingSystem.IsLinux() ? TimeSpan.FromMilliseconds(100) : TimeSpan.FromSeconds(5);
+        var timeout = TestPlatform.IsLinux ? TimeSpan.FromMilliseconds(100) : TimeSpan.FromSeconds(5);
         var terminatedCount = await _guardian.KillAllProcessesAsync(timeout);
 
         // Assert
@@ -301,12 +301,12 @@ public class ProcessGuardianTests : IDisposable
 
     private static string GetTestExecutable()
     {
-        return OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/echo";
+        return TestPlatform.IsWindows ? "cmd.exe" : "/bin/echo";
     }
 
     private static string GetTestArguments()
     {
-        return OperatingSystem.IsWindows() ? "/c echo test" : "test";
+        return TestPlatform.IsWindows ? "/c echo test" : "test";
     }
 
     private static ProcessStartInfo GetTestProcessStartInfo()
@@ -333,22 +333,22 @@ public class ProcessGuardianTests : IDisposable
 
     private static string GetLongRunningExecutable()
     {
-        return OperatingSystem.IsWindows() ? "ping" : "/bin/sleep";
+        return TestPlatform.IsWindows ? "ping" : "/bin/sleep";
     }
 
     private static string GetLongRunningArguments()
     {
-        return OperatingSystem.IsWindows() ? "localhost -n 30" : "30";
+        return TestPlatform.IsWindows ? "localhost -n 30" : "30";
     }
 
     private static string GetShortLivedExecutable()
     {
-        return OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/echo";
+        return TestPlatform.IsWindows ? "cmd.exe" : "/bin/echo";
     }
 
     private static string GetShortLivedArguments()
     {
-        return OperatingSystem.IsWindows() ? "/c exit 0" : "";
+        return TestPlatform.IsWindows ? "/c exit 0" : "";
     }
 
     private static bool IsProcessRunning(int processId)
