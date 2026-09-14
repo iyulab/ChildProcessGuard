@@ -54,10 +54,7 @@ public class UnixSpecificTests : IDisposable
 
         // Arrange - a child that exits cleanly on SIGTERM; SIGKILL would leave a non-zero exit code
         _guardian = new ProcessGuardian();
-        var process = _guardian.StartProcessWithStartInfo(new ProcessStartInfo("/bin/sh", "-c \"trap 'exit 0' TERM; sleep 60 & wait\"")
-        {
-            UseShellExecute = false,
-        });
+        var process = StartShell("trap 'exit 0' TERM; sleep 60 & wait");
         await Task.Delay(200); // let the shell install its trap
 
         // Act
@@ -74,75 +71,49 @@ public class UnixSpecificTests : IDisposable
     {
         Skip.If(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
 
-        // Arrange - a shell that ignores SIGTERM and reports the pid of its sleeping grandchild
+        // Arrange - root and grandchild shells both ignore SIGTERM; the grandchild's pid is reported on stdout
         _guardian = new ProcessGuardian(new ProcessGuardianOptions
         {
             ProcessKillTimeout = TimeSpan.FromMilliseconds(300),
             ForceKillOnTimeout = true,
         });
-        var process = _guardian.StartProcessWithStartInfo(new ProcessStartInfo("/bin/sh", "-c \"trap '' TERM; sleep 60 & echo $!; wait\"")
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-        });
+        var process = StartShell(
+            "trap '' TERM; sh -c 'trap \"\" TERM; while :; do sleep 1; done' & echo $!; wait",
+            redirectStandardOutput: true);
         var grandchildPid = int.Parse(process.StandardOutput.ReadLine()!);
+        await Task.Delay(200);
 
         // Act
         await _guardian.KillAllProcessesAsync();
 
         // Assert - the tree is gone and this process is still here to observe it
         process.WaitForExit(2000).Should().BeTrue();
-        await Task.Delay(200);
+        await Task.Delay(300);
         var grandchildAlive = () => Process.GetProcessById(grandchildPid);
-        grandchildAlive.Should().Throw<ArgumentException>("the sleeping grandchild should have been killed with the tree");
+        grandchildAlive.Should().Throw<ArgumentException>("the grandchild shell should have been killed with the tree");
     }
 
     [SkippableFact]
-    public async Task ProcessTermination_OnUnix_ShouldUseSIGTERM()
+    public void SignalProcessTreeUnix_WithSIGKILL_KillsRootAndDescendants()
     {
         Skip.If(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
 
-        // Arrange
-        _guardian = new ProcessGuardian();
-        var process = _guardian.StartProcess("/bin/sleep", "60");
-
-        // Act
-        var terminatedCount = await _guardian.KillAllProcessesAsync(TimeSpan.FromSeconds(2));
-
-        // Assert
-        terminatedCount.Should().Be(1);
-
-        // Wait for termination
-        await Task.Delay(500);
-
-        process.HasExited.Should().BeTrue();
-    }
-
-    [SkippableFact]
-    public async Task ProcessTermination_WithTimeout_ShouldUseSIGKILL()
-    {
-        Skip.If(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
-
-        // Arrange
-        var options = new ProcessGuardianOptions
+        // Exercises the portable tree kill directly, independent of the runtime's Kill(entireProcessTree).
+        using var process = Process.Start(new ProcessStartInfo("/bin/sh")
         {
-            ProcessKillTimeout = TimeSpan.FromMilliseconds(100),
-            ForceKillOnTimeout = true
-        };
-        _guardian = new ProcessGuardian(options);
+            ArgumentList = { "-c", "trap '' TERM; sh -c 'trap \"\" TERM; while :; do sleep 1; done' & echo $!; wait" },
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+        })!;
+        var grandchildPid = int.Parse(process.StandardOutput.ReadLine()!);
 
-        // Start a process that ignores SIGTERM (would need custom script)
-        var process = _guardian.StartProcess("/bin/sleep", "60");
+        var delivered = CompatibilityExtensions.SignalProcessTreeUnix(process.Id, 9);
 
-        // Act
-        var terminatedCount = await _guardian.KillAllProcessesAsync();
-
-        // Assert
-        terminatedCount.Should().Be(1);
-
-        // Even with short timeout, SIGKILL should force termination
-        await Task.Delay(1000);
-        process.HasExited.Should().BeTrue();
+        delivered.Should().BeTrue();
+        process.WaitForExit(2000).Should().BeTrue();
+        Thread.Sleep(300);
+        var grandchildAlive = () => Process.GetProcessById(grandchildPid);
+        grandchildAlive.Should().Throw<ArgumentException>();
     }
 
     [SkippableFact]
@@ -248,4 +219,16 @@ public class UnixSpecificTests : IDisposable
     }
 
     #endregion
+
+    private Process StartShell(string script, bool redirectStandardOutput = false)
+    {
+        var startInfo = new ProcessStartInfo("/bin/sh")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = redirectStandardOutput,
+        };
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add(script);
+        return _guardian!.StartProcessWithStartInfo(startInfo);
+    }
 }

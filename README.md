@@ -31,6 +31,7 @@ A cross-platform .NET library that ensures child processes automatically termina
 |---|---|
 | `netstandard2.0` | Supported |
 | `netstandard2.1` | Supported |
+| `net8.0` | Supported |
 | `net10.0` | Supported |
 
 ## Installation
@@ -296,6 +297,7 @@ using var custom = new ProcessGuardianBuilder()
 ### Unix Implementation (Linux/macOS)
 - Uses manual process tree tracking via `/proc` filesystem (Linux) and native APIs
 - Sends `SIGTERM` to the process and its descendants for graceful termination, then `SIGKILL` after the timeout
+- On .NET 8+ the forced kill uses `Process.Kill(entireProcessTree: true)`; the .NET Standard builds walk `/proc`, so on macOS they terminate only the child itself
 - Never signals process groups: children share the parent's group, so a group signal would reach the calling application
 - Enumerates and terminates descendant processes using process tree walking
 

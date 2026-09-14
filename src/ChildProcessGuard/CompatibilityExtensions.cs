@@ -86,6 +86,8 @@ internal static class CompatibilityExtensions
         }
 
 #if NET5_0_OR_GREATER
+        // The runtime's own implementation enumerates descendants on every supported OS; the
+        // portable fallback below can only walk /proc, so it is Linux-complete but root-only on macOS.
         try
         {
             process.Kill(entireProcessTree: true);
@@ -136,7 +138,7 @@ internal static class CompatibilityExtensions
     /// processes that have one.
     /// </summary>
     /// <returns>True if a termination request was delivered to the root process</returns>
-    public static bool RequestTermination(this Process process)
+    internal static bool RequestTermination(this Process process)
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
