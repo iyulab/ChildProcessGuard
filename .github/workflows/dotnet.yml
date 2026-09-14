@@ -63,14 +63,6 @@ jobs:
         dotnet pack ${{ env.PROJECT_PATH }} --configuration Release --no-build --output nupkg
         echo "📦 Created package with version ${{ steps.get_version.outputs.version }}"
 
-    - name: Create Git Tag
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.check_tag.outputs.exists == 'false'
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        git tag -a "v${{ steps.get_version.outputs.version }}" -m "Release v${{ steps.get_version.outputs.version }}"
-        git push origin "v${{ steps.get_version.outputs.version }}"
-
     - name: Push to NuGet
       if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.check_tag.outputs.exists == 'false'
       run: |
@@ -79,6 +71,14 @@ jobs:
           --api-key ${{ secrets.NUGET_API_KEY }} \
           --skip-duplicate
         echo "✅ Published version ${{ steps.get_version.outputs.version }} to NuGet"
+
+    - name: Create Git Tag
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.check_tag.outputs.exists == 'false'
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git tag -a "v${{ steps.get_version.outputs.version }}" -m "Release v${{ steps.get_version.outputs.version }}"
+        git push origin "v${{ steps.get_version.outputs.version }}"
 
     - name: Create GitHub Release
       if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.check_tag.outputs.exists == 'false'
