@@ -504,10 +504,13 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
             var process = processInfo.Process;
             LogMessage($"Terminating process: {processInfo}", LogLevel.Debug);
 
-            // Try graceful termination first
+            // Try graceful termination first. CloseMainWindow only delivers a close request when the
+            // process has a main window; for console processes (and on Unix) it returns false, and
+            // waiting for a process that was never asked to exit would just burn the timeout.
+            bool closeRequested;
             try
             {
-                process.CloseMainWindow();
+                closeRequested = process.CloseMainWindow();
             }
             catch (InvalidOperationException)
             {
@@ -516,17 +519,23 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
                 return;
             }
 
-            // Wait for graceful termination
-            using var cts = new CancellationTokenSource(timeout);
-            try
+            if (closeRequested)
             {
-                await process.WaitForExitAsync(cts.Token);
-                OnProcessLifecycleEvent(processInfo, ProcessLifecycleEventType.ProcessExited);
-                return;
+                using var cts = new CancellationTokenSource(timeout);
+                try
+                {
+                    await process.WaitForExitAsync(cts.Token);
+                    OnProcessLifecycleEvent(processInfo, ProcessLifecycleEventType.ProcessExited);
+                    return;
+                }
+                catch (OperationCanceledException)
+                {
+                    // Timeout occurred, force termination
+                }
             }
-            catch (OperationCanceledException)
+            else
             {
-                // Timeout occurred, force termination
+                LogMessage($"No close request could be delivered to process {processInfo.Id}; skipping graceful wait", LogLevel.Debug);
             }
 
             // Force termination if graceful termination failed

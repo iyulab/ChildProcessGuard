@@ -12,6 +12,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - A process that started but could not be registered is terminated instead of being left orphaned, and a failed `Process.Start()` reports the original exception instead of `No process is associated with this object`.
 - `ManagedProcessInfo.Id` and `ManagedProcessInfo.ToString()` no longer throw after the underlying `Process` has been disposed.
 - `RemoveProcess(Process)` works on a disposed `Process` instance (matched by identity rather than by reading `Process.Id`).
+- Termination no longer waits the full `ProcessKillTimeout` for a process that could not be sent a close request (console processes, and every process on Unix, where `CloseMainWindow` returns `false`); it proceeds straight to forced termination. Disposing a guardian with running console children previously took the whole timeout (30 seconds by default).
 
 ### Added
 - `RemoveProcess(int processId)` overload.

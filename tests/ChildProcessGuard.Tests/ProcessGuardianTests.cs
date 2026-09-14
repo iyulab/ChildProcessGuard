@@ -50,15 +50,17 @@ public class ProcessGuardianTests : IDisposable
         _guardian.Options.EnableDetailedLogging.Should().BeTrue();
     }
 
-    [Fact(Skip = "Skipped in CI - starts process")]
+    [Fact]
+    [Trait("Category", "Process")]
     public void StartProcess_WithValidExecutable_ShouldStartAndTrackProcess()
     {
         // Arrange
         _guardian = new ProcessGuardian();
-        var executable = GetTestExecutable();
+        var executable = GetLongRunningExecutable();
+        var arguments = GetLongRunningArguments();
 
         // Act
-        var process = _guardian.StartProcess(executable);
+        var process = _guardian.StartProcess(executable, arguments);
 
         // Assert
         process.Should().NotBeNull();
@@ -70,40 +72,45 @@ public class ProcessGuardianTests : IDisposable
         processInfo!.OriginalFileName.Should().Be(executable);
     }
 
-    [Fact(Skip = "Skipped in CI - starts process")]
+    [Fact]
+    [Trait("Category", "Process")]
     public async Task StartProcessAsync_WithValidExecutable_ShouldStartProcess()
     {
         // Arrange
         _guardian = new ProcessGuardian();
-        var executable = GetTestExecutable();
+        var executable = GetLongRunningExecutable();
+        var arguments = GetLongRunningArguments();
 
         // Act
-        var process = await _guardian.StartProcessAsync(executable);
+        var process = await _guardian.StartProcessAsync(executable, arguments);
 
         // Assert
         process.Should().NotBeNull();
         _guardian.ManagedProcessCount.Should().Be(1);
     }
 
-    [Fact(Skip = "Skipped in CI - starts process")]
+    [Fact]
+    [Trait("Category", "Process")]
     public void StartProcess_WhenMaxProcessesReached_ShouldThrowException()
     {
         // Arrange
         var options = new ProcessGuardianOptions { MaxManagedProcesses = 2 };
         _guardian = new ProcessGuardian(options);
-        var executable = GetTestExecutable();
+        var executable = GetLongRunningExecutable();
+        var arguments = GetLongRunningArguments();
 
         // Act
-        _guardian.StartProcess(executable);
-        _guardian.StartProcess(executable);
+        _guardian.StartProcess(executable, arguments);
+        _guardian.StartProcess(executable, arguments);
 
         // Assert
-        var action = () => _guardian.StartProcess(executable);
+        var action = () => _guardian.StartProcess(executable, arguments);
         action.Should().Throw<InvalidOperationException>()
             .WithMessage("*Maximum number of managed processes*");
     }
 
-    [Fact(Skip = "Skipped in CI - too slow")]
+    [Fact]
+    [Trait("Category", "Process")]
     public async Task KillAllProcessesAsync_ShouldTerminateAllProcesses()
     {
         // Arrange
@@ -133,7 +140,8 @@ public class ProcessGuardianTests : IDisposable
         process2.HasExited.Should().BeTrue();
     }
 
-    [Fact(Skip = "Skipped in CI - too slow")]
+    [Fact]
+    [Trait("Category", "Process")]
     public async Task GetStatistics_ShouldReturnAccurateMetrics()
     {
         // Arrange
@@ -157,16 +165,18 @@ public class ProcessGuardianTests : IDisposable
         stats.TotalMemoryUsage.Should().BeGreaterThan(0);
     }
 
-    [Fact(Skip = "Skipped in CI - starts process")]
+    [Fact]
+    [Trait("Category", "Process")]
     public void GetManagedProcesses_ShouldReturnAllTrackedProcesses()
     {
         // Arrange
         _guardian = new ProcessGuardian();
-        var executable = GetTestExecutable();
+        var executable = GetLongRunningExecutable();
+        var arguments = GetLongRunningArguments();
 
         // Act
-        _guardian.StartProcess(executable);
-        _guardian.StartProcess(executable);
+        _guardian.StartProcess(executable, arguments);
+        _guardian.StartProcess(executable, arguments);
 
         var processes = _guardian.GetManagedProcesses();
 
@@ -175,13 +185,15 @@ public class ProcessGuardianTests : IDisposable
         processes.Should().OnlyContain(p => p.IsManaged);
     }
 
-    [Fact(Skip = "Skipped in CI - starts process")]
+    [Fact]
+    [Trait("Category", "Process")]
     public void RemoveProcess_ShouldUntrackProcess()
     {
         // Arrange
         _guardian = new ProcessGuardian();
-        var executable = GetTestExecutable();
-        var process = _guardian.StartProcess(executable);
+        var executable = GetLongRunningExecutable();
+        var arguments = GetLongRunningArguments();
+        var process = _guardian.StartProcess(executable, arguments);
 
         // Act
         var removed = _guardian.RemoveProcess(process);
@@ -192,14 +204,16 @@ public class ProcessGuardianTests : IDisposable
         _guardian.GetProcessInfo(process.Id).Should().BeNull();
     }
 
-    [Fact(Skip = "Skipped in CI - too slow")]
+    [Fact]
+    [Trait("Category", "Process")]
     public void Dispose_ShouldTerminateAllProcesses()
     {
         // Arrange
         _guardian = new ProcessGuardian();
         var executable = GetLongRunningExecutable();
+        var arguments = GetLongRunningArguments();
 
-        var process = _guardian.StartProcess(executable);
+        var process = _guardian.StartProcess(executable, arguments);
         var processId = process.Id;
 
         // Act
@@ -240,11 +254,12 @@ public class ProcessGuardianTests : IDisposable
         _guardian.Dispose();
 
         // Act & Assert
-        var action = () => _guardian.StartProcess(GetTestExecutable());
+        var action = () => _guardian.StartProcess(GetLongRunningExecutable(), GetLongRunningArguments());
         action.Should().Throw<ObjectDisposedException>();
     }
 
-    [Fact(Skip = "Skipped in CI - starts process")]
+    [Fact]
+    [Trait("Category", "Process")]
     public void ProcessLifecycleEvent_ShouldBeRaisedOnProcessStart()
     {
         // Arrange
@@ -253,14 +268,15 @@ public class ProcessGuardianTests : IDisposable
         _guardian.ProcessLifecycleEvent += (s, e) => capturedEvent = e;
 
         // Act
-        _guardian.StartProcess(GetTestExecutable());
+        _guardian.StartProcess(GetLongRunningExecutable(), GetLongRunningArguments());
 
         // Assert
         capturedEvent.Should().NotBeNull();
         capturedEvent!.EventType.Should().Be(ProcessLifecycleEventType.ProcessStarted);
     }
 
-    [Fact(Skip = "Skipped in CI - too slow")]
+    [Fact]
+    [Trait("Category", "Process")]
     public async Task ProcessExitedEvent_ShouldBeRaisedWhenProcessEnds()
     {
         // Arrange
@@ -273,7 +289,7 @@ public class ProcessGuardianTests : IDisposable
         };
 
         // Act
-        var process = _guardian.StartProcess(GetShortLivedExecutable());
+        var process = _guardian.StartProcess(GetShortLivedExecutable(), GetShortLivedArguments());
         await Task.Delay(2000); // Wait for process to exit
 
         // Assert
@@ -322,12 +338,17 @@ public class ProcessGuardianTests : IDisposable
 
     private static string GetLongRunningArguments()
     {
-        return OperatingSystem.IsWindows() ? "localhost -n 100" : "60";
+        return OperatingSystem.IsWindows() ? "localhost -n 30" : "30";
     }
 
     private static string GetShortLivedExecutable()
     {
         return OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/echo";
+    }
+
+    private static string GetShortLivedArguments()
+    {
+        return OperatingSystem.IsWindows() ? "/c exit 0" : "";
     }
 
     private static bool IsProcessRunning(int processId)

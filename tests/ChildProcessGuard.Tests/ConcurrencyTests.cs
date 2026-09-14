@@ -280,7 +280,7 @@ public class ConcurrencyTests : IDisposable
 
     private static string GetTestArguments()
     {
-        return OperatingSystem.IsWindows() ? "localhost -n 100" : "60";
+        return OperatingSystem.IsWindows() ? "localhost -n 30" : "30";
     }
 
     private static ProcessStartInfo GetTestProcessStartInfo()
@@ -301,7 +301,7 @@ public class ConcurrencyTests : IDisposable
 
     private static string GetLongRunningArguments()
     {
-        return OperatingSystem.IsWindows() ? "localhost -n 100" : "60";
+        return OperatingSystem.IsWindows() ? "localhost -n 30" : "30";
     }
 
     private static ProcessStartInfo GetLongRunningProcessStartInfo()
