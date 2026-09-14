@@ -85,6 +85,23 @@ internal static class CompatibilityExtensions
             return;
         }
 
+#if NET5_0_OR_GREATER
+        try
+        {
+            process.Kill(entireProcessTree: true);
+            return;
+        }
+        catch (InvalidOperationException)
+        {
+            // Process already exited
+            return;
+        }
+        catch
+        {
+            // Fall through to the portable implementation
+        }
+#endif
+
         try
         {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -93,7 +110,7 @@ internal static class CompatibilityExtensions
             }
             else
             {
-                KillProcessTreeUnix(process.Id);
+                SignalProcessTreeUnix(process.Id, NativeMethods.SIGKILL);
             }
         }
         catch
@@ -111,6 +128,22 @@ internal static class CompatibilityExtensions
                 // Process already exited or disposed
             }
         }
+    }
+
+    /// <summary>
+    /// Asks the process and its descendants to terminate gracefully. On Unix this sends SIGTERM to
+    /// the process tree; on Windows it posts a close message to the main window, which only reaches
+    /// processes that have one.
+    /// </summary>
+    /// <returns>True if a termination request was delivered to the root process</returns>
+    public static bool RequestTermination(this Process process)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return process.CloseMainWindow();
+        }
+
+        return SignalProcessTreeUnix(process.Id, NativeMethods.SIGTERM);
     }
 
     /// <summary>
@@ -249,41 +282,25 @@ internal static class CompatibilityExtensions
     }
 
     /// <summary>
-    /// Kills process tree on Unix systems
+    /// Sends a signal to a process and to every descendant known at the time of the call.
+    /// Descendants are enumerated before the root is signalled so that they are still reachable
+    /// through their parent pid; a descendant re-parented afterwards is not affected.
     /// </summary>
-    /// <param name="processId">Process ID to kill</param>
-    private static void KillProcessTreeUnix(int processId)
+    /// <param name="rootProcessId">Process ID of the tree root</param>
+    /// <param name="signal">Signal number to send</param>
+    /// <returns>True if the signal was delivered to the root process</returns>
+    internal static bool SignalProcessTreeUnix(int rootProcessId, int signal)
     {
-        try
+        var descendants = GetChildProcessIdsUnix(rootProcessId);
+
+        var delivered = NativeMethods.SendSignal(rootProcessId, signal) == 0;
+
+        foreach (var pid in descendants)
         {
-            // Try to get process group and kill the group
-            var pgid = NativeMethods.GetProcessGroup(processId);
-            if (pgid > 0)
-            {
-                // Send SIGKILL directly - graceful termination already attempted in TerminateProcessAsync
-                // No delay here to avoid blocking the async flow
-                NativeMethods.KillProcessGroup(pgid, NativeMethods.SIGKILL);
-            }
-            else
-            {
-                // Fallback to kill just the process
-                var process = Process.GetProcessById(processId);
-                process.Kill();
-            }
+            NativeMethods.SendSignal(pid, signal);
         }
-        catch
-        {
-            // Final fallback
-            try
-            {
-                var process = Process.GetProcessById(processId);
-                process.Kill();
-            }
-            catch
-            {
-                // Process might have already exited
-            }
-        }
+
+        return delivered;
     }
 
     /// <summary>

@@ -504,13 +504,14 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
             var process = processInfo.Process;
             LogMessage($"Terminating process: {processInfo}", LogLevel.Debug);
 
-            // Try graceful termination first. CloseMainWindow only delivers a close request when the
-            // process has a main window; for console processes (and on Unix) it returns false, and
-            // waiting for a process that was never asked to exit would just burn the timeout.
+            // Try graceful termination first: SIGTERM to the tree on Unix, a close message to the
+            // main window on Windows. The request only counts as delivered when the platform says so
+            // (a Windows console process has no window to close), and waiting for a process that was
+            // never asked to exit would just burn the timeout.
             bool closeRequested;
             try
             {
-                closeRequested = process.CloseMainWindow();
+                closeRequested = process.RequestTermination();
             }
             catch (InvalidOperationException)
             {

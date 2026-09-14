@@ -35,6 +35,7 @@ public class ManagedProcessInfo
     /// <summary>
     /// The process group ID (Unix only)
     /// </summary>
+    [Obsolete("Unix process groups are not used; this value is always null.", false)]
     public int? ProcessGroupId { get; internal set; }
 
     /// <summary>

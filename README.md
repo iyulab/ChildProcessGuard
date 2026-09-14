@@ -295,7 +295,8 @@ using var custom = new ProcessGuardianBuilder()
 
 ### Unix Implementation (Linux/macOS)
 - Uses manual process tree tracking via `/proc` filesystem (Linux) and native APIs
-- Uses `SIGTERM` for graceful termination, `SIGKILL` for force termination
+- Sends `SIGTERM` to the process and its descendants for graceful termination, then `SIGKILL` after the timeout
+- Never signals process groups: children share the parent's group, so a group signal would reach the calling application
 - Enumerates and terminates descendant processes using process tree walking
 
 ### Cross-Platform Failsafes

@@ -26,15 +26,12 @@ internal static class NativeMethods
     [DllImport("kernel32.dll", SetLastError = true)]
     internal static extern bool QueryInformationJobObject(IntPtr hJob, JobObjectInfoType infoType, IntPtr lpJobObjectInfo, uint cbJobObjectInfoLength, out uint lpReturnLength);
 
-    // Unix system calls
-    [DllImport("libc", EntryPoint = "setpgid", SetLastError = true)]
-    internal static extern int SetProcessGroup(int pid, int pgid);
-
-    [DllImport("libc", EntryPoint = "killpg", SetLastError = true)]
-    internal static extern int KillProcessGroup(int pgrp, int sig);
-
-    [DllImport("libc", EntryPoint = "getpgid", SetLastError = true)]
-    internal static extern int GetProcessGroup(int pid);
+    // Unix system calls.
+    // Signals are always sent to individual pids. A child started through System.Diagnostics.Process
+    // shares the caller's process group (setpgid cannot be applied from the parent once the child has
+    // exec'd), so signalling a process group would hit the calling application itself.
+    [DllImport("libc", EntryPoint = "kill", SetLastError = true)]
+    internal static extern int SendSignal(int pid, int sig);
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION

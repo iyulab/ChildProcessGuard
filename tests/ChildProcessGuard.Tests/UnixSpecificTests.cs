@@ -44,10 +44,57 @@ public class UnixSpecificTests : IDisposable
         // Assert
         var processInfo = _guardian.GetProcessInfo(process.Id);
         processInfo.Should().NotBeNull();
+        processInfo!.IsManaged.Should().BeTrue();
+    }
 
-        // Note: Process groups are not supported due to .NET API limitations
-        // Manual process tree tracking is used instead on Unix systems
-        processInfo!.ProcessGroupId.Should().BeNull("Process groups are not supported on Unix");
+    [SkippableFact]
+    public async Task GracefulTermination_OnUnix_DeliversSIGTERM()
+    {
+        Skip.If(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
+
+        // Arrange - a child that exits cleanly on SIGTERM; SIGKILL would leave a non-zero exit code
+        _guardian = new ProcessGuardian();
+        var process = _guardian.StartProcessWithStartInfo(new ProcessStartInfo("/bin/sh", "-c \"trap 'exit 0' TERM; sleep 60 & wait\"")
+        {
+            UseShellExecute = false,
+        });
+        await Task.Delay(200); // let the shell install its trap
+
+        // Act
+        var terminatedCount = await _guardian.KillAllProcessesAsync(TimeSpan.FromSeconds(5));
+
+        // Assert
+        terminatedCount.Should().Be(1);
+        process.WaitForExit(2000).Should().BeTrue();
+        process.ExitCode.Should().Be(0, "the child should have exited from its SIGTERM trap, not from SIGKILL");
+    }
+
+    [SkippableFact]
+    public async Task ForcedTermination_OnUnix_KillsDescendants_AndSparesTheCaller()
+    {
+        Skip.If(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
+
+        // Arrange - a shell that ignores SIGTERM and reports the pid of its sleeping grandchild
+        _guardian = new ProcessGuardian(new ProcessGuardianOptions
+        {
+            ProcessKillTimeout = TimeSpan.FromMilliseconds(300),
+            ForceKillOnTimeout = true,
+        });
+        var process = _guardian.StartProcessWithStartInfo(new ProcessStartInfo("/bin/sh", "-c \"trap '' TERM; sleep 60 & echo $!; wait\"")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+        });
+        var grandchildPid = int.Parse(process.StandardOutput.ReadLine()!);
+
+        // Act
+        await _guardian.KillAllProcessesAsync();
+
+        // Assert - the tree is gone and this process is still here to observe it
+        process.WaitForExit(2000).Should().BeTrue();
+        await Task.Delay(200);
+        var grandchildAlive = () => Process.GetProcessById(grandchildPid);
+        grandchildAlive.Should().Throw<ArgumentException>("the sleeping grandchild should have been killed with the tree");
     }
 
     [SkippableFact]

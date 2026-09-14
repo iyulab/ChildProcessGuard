@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [1.2.0] - 2026-09-14
 
 ### Fixed
+- **Unix: forced termination no longer kills the calling application.** The tree kill sent `SIGKILL` to the process *group* returned by `getpgid(child)`, but children started through `System.Diagnostics.Process` share the parent's group (no `setpgid` is ever applied), so `Dispose`, `KillAllProcesses` and `TerminateProcessesWhere` terminated the parent and its siblings along with the child. Signals are now sent to the child and its enumerated descendants individually; on .NET 5+ builds the forced kill uses `Process.Kill(entireProcessTree: true)`.
+- Unix: graceful termination now actually sends `SIGTERM` to the process tree before escalating to `SIGKILL`; previously only `CloseMainWindow` was attempted, which is a no-op on Unix.
 - `StartProcessWithStartInfo` threw `InvalidOperationException: Process with ID N is already being managed` when the OS reused the pid of an exited child before the periodic cleanup had run (up to `CleanupInterval`, 5 minutes by default). The new child had already started and was left running unmanaged and outside the job object. Exited processes now leave the managed table as soon as their `Exited` event fires, and a pid collision on registration replaces the stale entry instead of throwing.
 - Exited processes no longer count toward `MaxManagedProcesses`.
 - A child that exits before event notification is enabled no longer misses its `Exited` handling.
@@ -16,6 +18,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 - `RemoveProcess(int processId)` overload.
+
+### Deprecated
+- `ManagedProcessInfo.ProcessGroupId` — always `null`; process groups are not used (`UseProcessGroupsOnUnix` was already marked obsolete).
 
 ### Changed
 - The guardian no longer disposes the `Process` instances returned by the `Start*` methods; the caller owns them. Previously the periodic cleanup disposed them after `CleanupInterval`, which made a later `process.ExitCode` read throw.
