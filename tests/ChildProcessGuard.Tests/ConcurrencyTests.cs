@@ -30,12 +30,12 @@ public class ConcurrencyTests : IDisposable
 
         // Act
         var tasks = Enumerable.Range(0, 20)
-            .Select(_ => Task.Run(() => _guardian.StartProcess(executable)))
+            .Select(_ => Task.Run(() => _guardian.StartProcess(executable, GetTestArguments())))
             .ToArray();
 
         var processes = await Task.WhenAll(tasks);
 
-        // Assert
+        // Assert - the children are still running, so every one of them must be tracked
         processes.Should().HaveCount(20);
         processes.Should().OnlyContain(p => p != null);
         _guardian.ManagedProcessCount.Should().Be(20);
@@ -54,7 +54,7 @@ public class ConcurrencyTests : IDisposable
 
         // Act - Start processes
         var startTasks = Enumerable.Range(0, 10)
-            .Select(_ => _guardian.StartProcessAsync(executable))
+            .Select(_ => _guardian.StartProcessAsync(executable, GetLongRunningArguments()))
             .ToArray();
 
         await Task.WhenAll(startTasks);

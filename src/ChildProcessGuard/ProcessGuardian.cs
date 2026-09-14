@@ -162,12 +162,13 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
         }
 
         Process? process = null;
+        ManagedProcessInfo? processInfo = null;
         try
         {
             process = new Process { StartInfo = startInfo };
             process.Start();
 
-            var processInfo = new ManagedProcessInfo(
+            processInfo = new ManagedProcessInfo(
                 process,
                 startInfo.FileName,
                 startInfo.Arguments,
@@ -175,18 +176,15 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
                 startInfo.Environment.Count > 0 ? startInfo.Environment.Where(kvp => kvp.Value != null).ToDictionary(kvp => kvp.Key, kvp => kvp.Value!) : null
             );
 
-            // Add to managed processes
-            if (!_managedProcesses.TryAdd(process.Id, processInfo))
-            {
-                throw new InvalidOperationException($"Process with ID {process.Id} is already being managed");
-            }
+            Track(processInfo);
 
             // Platform-specific setup
             SetupPlatformSpecificProcessManagement(processInfo);
 
-            // Set up process exit event handler
-            process.EnableRaisingEvents = true;
+            // Attach the handler before enabling events: if the child has already exited,
+            // enabling raises Exited immediately and a handler attached afterwards would miss it.
             process.Exited += (sender, e) => OnProcessExited(processInfo);
+            process.EnableRaisingEvents = true;
 
             OnProcessLifecycleEvent(processInfo, ProcessLifecycleEventType.ProcessStarted);
             LogMessage($"Started process: {processInfo}", LogLevel.Information);
@@ -195,10 +193,15 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            // Clean up on failure
+            // Clean up on failure. If the child was already started, the caller will never receive
+            // its Process — terminate it rather than leave an unreferenced child running.
             if (process != null)
             {
-                _managedProcesses.TryRemove(process.Id, out _);
+                if (processInfo != null)
+                {
+                    Untrack(processInfo);
+                    try { if (!process.HasExited) process.Kill(); } catch { }
+                }
                 try { process.Dispose(); } catch { }
             }
 
@@ -272,6 +275,9 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
 
     /// <summary>
     /// Removes a specific process from the management list.
+    /// The process is matched by object identity, so this works even after the
+    /// <see cref="Process"/> instance has been disposed. The instance itself is not disposed;
+    /// the caller owns the <see cref="Process"/> returned by the Start methods.
     /// </summary>
     /// <param name="process">The process to remove</param>
     /// <returns>True if the process was removed, false if it wasn't being managed</returns>
@@ -282,29 +288,28 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
         if (process == null)
             throw new ArgumentNullException(nameof(process));
 
-        if (_managedProcesses.TryRemove(process.Id, out var processInfo))
+        foreach (var kvp in _managedProcesses)
         {
-            processInfo.IsManaged = false;
-            OnProcessLifecycleEvent(processInfo, ProcessLifecycleEventType.ProcessRemoved);
-            LogMessage($"Removed process from management: {processInfo}", LogLevel.Information);
-
-            // Dispose the process if it has exited
-            try
+            if (ReferenceEquals(kvp.Value.Process, process))
             {
-                if (process.HasExited)
-                {
-                    process.Dispose();
-                }
+                return Untrack(kvp.Value, ProcessLifecycleEventType.ProcessRemoved);
             }
-            catch (InvalidOperationException)
-            {
-                // Process was already disposed
-            }
-
-            return true;
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Removes the process currently managed under the given process ID from the management list.
+    /// </summary>
+    /// <param name="processId">The process ID</param>
+    /// <returns>True if a process was removed, false if no process with that ID was being managed</returns>
+    public bool RemoveProcess(int processId)
+    {
+        ThrowIfDisposed();
+
+        return _managedProcesses.TryGetValue(processId, out var processInfo)
+            && Untrack(processInfo, ProcessLifecycleEventType.ProcessRemoved);
     }
 
     /// <summary>
@@ -636,7 +641,6 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
         try
         {
             var startTime = DateTime.UtcNow;
-            var processesToRemove = new List<int>();
             int cleanedUp = 0;
             int failed = 0;
 
@@ -645,10 +649,8 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
                 var processInfo = kvp.Value;
                 try
                 {
-                    if (processInfo.HasExited)
+                    if (processInfo.HasExited && Untrack(processInfo))
                     {
-                        processesToRemove.Add(kvp.Key);
-                        processInfo.Process.Dispose();
                         cleanedUp++;
                     }
                 }
@@ -657,12 +659,6 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
                     failed++;
                     OnProcessError("AutoCleanup", ex, kvp.Key);
                 }
-            }
-
-            // Remove disposed processes
-            foreach (var processId in processesToRemove)
-            {
-                _managedProcesses.TryRemove(processId, out _);
             }
 
             var duration = DateTime.UtcNow - startTime;
@@ -700,8 +696,50 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
 
     private void OnProcessExited(ManagedProcessInfo processInfo)
     {
+        // A pid is only a valid key while its process is alive: drop the entry now so the OS can
+        // hand the pid to a new child without colliding with a stale one.
+        Untrack(processInfo);
         OnProcessLifecycleEvent(processInfo, ProcessLifecycleEventType.ProcessExited);
         LogMessage($"Process exited: {processInfo}", LogLevel.Information);
+    }
+
+    /// <summary>
+    /// Registers a process in the managed table. An existing entry under the same pid can only be a
+    /// stale one — the OS does not reuse a pid while a live process holds it — so it is evicted and
+    /// replaced rather than treated as a conflict.
+    /// </summary>
+    internal void Track(ManagedProcessInfo processInfo)
+    {
+        while (!_managedProcesses.TryAdd(processInfo.Id, processInfo))
+        {
+            if (_managedProcesses.TryGetValue(processInfo.Id, out var existing) && Untrack(existing))
+            {
+                LogMessage(
+                    existing.HasExited
+                        ? $"Evicted stale entry for reused pid {existing.Id}"
+                        : $"Evicted entry for pid {existing.Id} that still reports running; the pid was reassigned by the OS",
+                    existing.HasExited ? LogLevel.Debug : LogLevel.Warning);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Removes exactly this entry from the managed table. Removal is conditional on identity, so a
+    /// newer process registered under the same pid is never removed by mistake.
+    /// </summary>
+    private bool Untrack(ManagedProcessInfo processInfo, ProcessLifecycleEventType? eventType = null)
+    {
+        var entry = new KeyValuePair<int, ManagedProcessInfo>(processInfo.Id, processInfo);
+        if (!((ICollection<KeyValuePair<int, ManagedProcessInfo>>)_managedProcesses).Remove(entry))
+            return false;
+
+        processInfo.IsManaged = false;
+        if (eventType.HasValue)
+        {
+            OnProcessLifecycleEvent(processInfo, eventType.Value);
+            LogMessage($"Removed process from management: {processInfo}", LogLevel.Information);
+        }
+        return true;
     }
 
     private void OnProcessExit(object? sender, EventArgs e)

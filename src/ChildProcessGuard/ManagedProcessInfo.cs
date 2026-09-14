@@ -67,9 +67,10 @@ public class ManagedProcessInfo
     }
 
     /// <summary>
-    /// The process ID
+    /// The process ID, captured when the process was registered.
+    /// Remains readable after the underlying <see cref="Process"/> has exited or been disposed.
     /// </summary>
-    public int Id => Process.Id;
+    public int Id { get; }
 
     /// <summary>
     /// The process name
@@ -112,6 +113,7 @@ public class ManagedProcessInfo
         string? workingDirectory = null, Dictionary<string, string>? environmentVariables = null)
     {
         Process = process ?? throw new ArgumentNullException(nameof(process));
+        Id = process.Id;
         OriginalFileName = originalFileName ?? throw new ArgumentNullException(nameof(originalFileName));
         OriginalArguments = originalArguments ?? string.Empty;
         WorkingDirectory = workingDirectory;

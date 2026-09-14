@@ -26,12 +26,14 @@ public class ProcessGuardianOptions
     public int MaxManagedProcesses { get; set; } = 100;
 
     /// <summary>
-    /// Whether to automatically clean up disposed processes from the managed list
+    /// Whether to periodically sweep exited processes out of the managed list.
+    /// Exited processes are normally removed as soon as they exit; the sweep is a fallback for
+    /// processes whose exit notification was never delivered.
     /// </summary>
     public bool AutoCleanupDisposedProcesses { get; set; } = true;
 
     /// <summary>
-    /// Interval for checking and cleaning up disposed processes
+    /// Interval of the fallback sweep for exited processes
     /// </summary>
     public TimeSpan CleanupInterval { get; set; } = TimeSpan.FromMinutes(5);
 

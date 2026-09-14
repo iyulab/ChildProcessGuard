@@ -167,6 +167,26 @@ foreach (var processInfo in runningProcesses)
 }
 ```
 
+### Process Lifecycle and Ownership
+
+```csharp
+using var guardian = new ProcessGuardian();
+
+var process = guardian.StartProcess("worker.exe");
+
+// The returned Process belongs to the caller: read its exit code, wait on it, dispose it.
+// The guardian never disposes it for you.
+process.WaitForExit();
+Console.WriteLine($"Exit code: {process.ExitCode}");
+process.Dispose();
+
+// A process leaves the managed list as soon as it exits; there is nothing to clean up.
+// To stop guarding a process that is still running, remove it explicitly.
+var detached = guardian.StartProcess("daemon.exe");
+guardian.RemoveProcess(detached);       // by instance — works even if it was already disposed
+guardian.RemoveProcess(detached.Id);    // or by process ID
+```
+
 ### Async Operations
 
 ```csharp
@@ -238,8 +258,8 @@ var options = new ProcessGuardianOptions
     EnableDetailedLogging = false,                      // Verbose logging
     ForceKillOnTimeout = true,                          // Force kill if timeout exceeded
     MaxManagedProcesses = 100,                          // Maximum concurrent processes
-    AutoCleanupDisposedProcesses = true,                // Auto cleanup exited processes
-    CleanupInterval = TimeSpan.FromMinutes(5),          // Cleanup check interval
+    AutoCleanupDisposedProcesses = true,                // Fallback sweep for exited processes
+    CleanupInterval = TimeSpan.FromMinutes(5),          // Interval of the fallback sweep
     ThrowOnProcessOperationFailure = false,             // Exception handling behavior
     LogAction = msg => Console.WriteLine(msg)           // Custom log handler (optional)
 };
@@ -286,12 +306,13 @@ using var custom = new ProcessGuardianBuilder()
 ## Best Practices
 
 1. **Always use `using` statements** or call `Dispose()` explicitly
-2. **Configure appropriate timeouts** based on process characteristics
-3. **Handle events** for production applications to track errors
-4. **Use builder pattern** for complex configurations
-5. **Use `LogAction`** to route logs to your logging framework instead of relying on `Console.WriteLine`
-6. **Monitor statistics** in long-running applications
-7. **Test cross-platform behavior** when targeting multiple operating systems
+2. **Dispose the `Process` instances you start** — the guardian tracks them but does not own them
+3. **Configure appropriate timeouts** based on process characteristics
+4. **Handle events** for production applications to track errors
+5. **Use builder pattern** for complex configurations
+6. **Use `LogAction`** to route logs to your logging framework instead of relying on `Console.WriteLine`
+7. **Monitor statistics** in long-running applications
+8. **Test cross-platform behavior** when targeting multiple operating systems
 
 ## License
 
