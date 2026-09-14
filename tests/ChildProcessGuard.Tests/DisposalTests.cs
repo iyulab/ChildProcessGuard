@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using FluentAssertions;
 using Xunit;
+using static ChildProcessGuard.Tests.TestProcesses;
 
 namespace ChildProcessGuard.Tests;
 
@@ -228,71 +229,6 @@ public class DisposalTests
     }
 
     #region Helper Methods
-
-    private static string GetTestExecutable()
-    {
-        return TestPlatform.IsWindows ? "cmd.exe" : "/bin/echo";
-    }
-
-    private static string GetTestArguments()
-    {
-        return TestPlatform.IsWindows ? "/c echo test" : "test";
-    }
-
-    private static string GetShortLivedArguments()
-    {
-        return TestPlatform.IsWindows ? "/c exit 0" : "";
-    }
-
-    private static ProcessStartInfo GetTestProcessStartInfo()
-    {
-        return new ProcessStartInfo
-        {
-            FileName = GetTestExecutable(),
-            Arguments = GetTestArguments(),
-            CreateNoWindow = true,
-            UseShellExecute = false
-        };
-    }
-
-    private static string GetLongRunningExecutable()
-    {
-        return TestPlatform.IsWindows ? "ping" : "/bin/sleep";
-    }
-
-    private static string GetLongRunningArguments()
-    {
-        return TestPlatform.IsWindows ? "localhost -n 30" : "30";
-    }
-
-    private static ProcessStartInfo GetLongRunningProcessStartInfo()
-    {
-        return new ProcessStartInfo
-        {
-            FileName = GetLongRunningExecutable(),
-            Arguments = GetLongRunningArguments(),
-            CreateNoWindow = true,
-            UseShellExecute = false
-        };
-    }
-
-    private static string GetShortLivedExecutable()
-    {
-        return TestPlatform.IsWindows ? "cmd.exe" : "/bin/echo";
-    }
-
-    private static bool IsProcessRunning(int processId)
-    {
-        try
-        {
-            var process = Process.GetProcessById(processId);
-            return !process.HasExited;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-    }
 
     private static void CreateAndAbandonGuardian()
     {

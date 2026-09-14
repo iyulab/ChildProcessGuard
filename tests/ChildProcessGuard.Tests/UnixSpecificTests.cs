@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using FluentAssertions;
 using Xunit;
+using static ChildProcessGuard.Tests.TestProcesses;
 
 namespace ChildProcessGuard.Tests;
 
@@ -207,23 +208,6 @@ public class UnixSpecificTests : IDisposable
         var stillRunning = IsProcessRunning(processId);
         stillRunning.Should().BeFalse("Process should be terminated on Dispose");
     }
-
-    #region Helper Methods
-
-    private static bool IsProcessRunning(int processId)
-    {
-        try
-        {
-            var process = Process.GetProcessById(processId);
-            return !process.HasExited;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-    }
-
-    #endregion
 
     private Process StartShell(string script, bool redirectStandardOutput = false)
     {

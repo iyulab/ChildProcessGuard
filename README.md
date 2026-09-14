@@ -295,11 +295,19 @@ using var custom = new ProcessGuardianBuilder()
 - Per-process Job Object assignment tracking with graceful fallback
 
 ### Unix Implementation (Linux/macOS)
-- Uses manual process tree tracking via `/proc` filesystem (Linux) and native APIs
+- Tracks descendants by walking parent pids (`/proc` on Linux)
 - Sends `SIGTERM` to the process and its descendants for graceful termination, then `SIGKILL` after the timeout
 - On .NET 8+ the forced kill uses `Process.Kill(entireProcessTree: true)`; the .NET Standard builds walk `/proc`, so on macOS they terminate only the child itself
 - Never signals process groups: children share the parent's group, so a group signal would reach the calling application
-- Enumerates and terminates descendant processes using process tree walking
+
+### Termination Sequence
+
+`KillAllProcesses`, `TerminateProcessesWhere`, and `Dispose` terminate each managed process in two stages:
+
+1. **Graceful request.** Unix: `SIGTERM` to the process and its descendants. Windows: a close message to the process's main window (`CloseMainWindow`). If no request can be delivered — a Windows console process has no window — this stage is skipped rather than waited on.
+2. **Wait, then force.** If a request was delivered, the guardian waits up to `ProcessKillTimeout` (default 30 s) for the process to exit. If it is still running, or no request could be delivered, and `ForceKillOnTimeout` is `true` (default), the process tree is killed (`SIGKILL` on Unix, `TerminateProcess` on Windows). With `ForceKillOnTimeout = false` the process is left running after the graceful stage.
+
+On Windows, processes assigned to the Job Object are additionally terminated by the kernel when the guardian's job handle closes, including on abnormal parent exit.
 
 ### Cross-Platform Failsafes
 - Hooks into `AppDomain.ProcessExit` and `ConsoleCancelKeyPress` events

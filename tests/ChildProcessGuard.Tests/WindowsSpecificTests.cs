@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using FluentAssertions;
 using Xunit;
+using static ChildProcessGuard.Tests.TestProcesses;
 
 namespace ChildProcessGuard.Tests;
 
@@ -118,20 +119,4 @@ public class WindowsSpecificTests : IDisposable
         processInfo.Should().NotBeNull();
     }
 
-    #region Helper Methods
-
-    private static bool IsProcessRunning(int processId)
-    {
-        try
-        {
-            var process = Process.GetProcessById(processId);
-            return !process.HasExited;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-    }
-
-    #endregion
 }
