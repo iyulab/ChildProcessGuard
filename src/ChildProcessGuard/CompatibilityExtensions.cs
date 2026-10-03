@@ -178,12 +178,18 @@ internal static class CompatibilityExtensions
             return time;
         }
 
-        return WalkDescendants(rootProcessId, GetChildrenByParentWindows(), (parentId, childId) =>
+        return WalkDescendants(rootProcessId, ChildrenByParentWindows.Get(), (parentId, childId) =>
         {
             var parentCreated = CreationTime(parentId);
             return parentCreated != 0 && CreationTime(childId) >= parentCreated;
         });
     }
+
+    // Terminating many children at once asks for the process table once per child; sharing concurrent
+    // snapshots keeps that from growing with the number of children (see CoalescingSnapshot).
+    private static readonly CoalescingSnapshot<Dictionary<int, List<int>>> ChildrenByParentWindows = new(GetChildrenByParentWindows);
+
+    private static readonly CoalescingSnapshot<Dictionary<int, List<int>>> ChildrenByParentUnix = new(GetChildrenByParentUnix);
 
     private static Dictionary<int, List<int>> GetChildrenByParentWindows()
     {
@@ -283,7 +289,7 @@ internal static class CompatibilityExtensions
         Dictionary<int, List<int>> childrenByParent;
         try
         {
-            childrenByParent = GetChildrenByParentUnix();
+            childrenByParent = ChildrenByParentUnix.Get();
         }
         catch
         {
@@ -324,7 +330,7 @@ internal static class CompatibilityExtensions
         Dictionary<int, List<int>> childrenByParent;
         try
         {
-            childrenByParent = GetChildrenByParentUnix();
+            childrenByParent = ChildrenByParentUnix.Get();
         }
         catch
         {
@@ -341,7 +347,7 @@ internal static class CompatibilityExtensions
     /// <paramref name="isChildOf"/> accepts. Each process is visited once, so a cycle in the map
     /// (possible with stale parent pids) cannot loop.
     /// </summary>
-    private static List<int> WalkDescendants(int rootProcessId, Dictionary<int, List<int>> childrenByParent, Func<int, int, bool> isChildOf)
+    private static List<int> WalkDescendants(int rootProcessId, IReadOnlyDictionary<int, List<int>> childrenByParent, Func<int, int, bool> isChildOf)
     {
         var descendants = new List<int>();
         var visited = new HashSet<int> { rootProcessId };
