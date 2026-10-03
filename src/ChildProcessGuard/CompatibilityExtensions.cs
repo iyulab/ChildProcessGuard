@@ -288,11 +288,28 @@ internal static class CompatibilityExtensions
     {
         var descendants = GetDescendantProcessIdsUnix(rootProcessId);
 
-        var delivered = NativeMethods.SendSignal(rootProcessId, signal) == 0;
+        // TEMPORARY diagnosis (CPG_TRACE_SIGNALS): log every signal and its result.
+        var trace = Environment.GetEnvironmentVariable("CPG_TRACE_SIGNALS") == "1";
+        int Send(int pid)
+        {
+            var rc = NativeMethods.SendSignal(pid, signal);
+            if (trace)
+            {
+                var errno = rc == 0 ? 0 : Marshal.GetLastWin32Error();
+                string name;
+                try { using var p = Process.GetProcessById(pid); name = p.ProcessName; } catch { name = "?"; }
+                Console.Error.WriteLine($"[cpg-signal] self={Process.GetCurrentProcess().Id} root={rootProcessId} kill({pid} {name}, {signal}) rc={rc} errno={errno} descendants=[{string.Join(",", descendants)}]");
+                if (errno == 1)
+                    Console.Error.WriteLine("[cpg-signal] EPERM stack: " + new StackTrace(1, false).ToString().Replace(Environment.NewLine, " | "));
+            }
+            return rc;
+        }
+
+        var delivered = Send(rootProcessId) == 0;
 
         foreach (var pid in descendants)
         {
-            NativeMethods.SendSignal(pid, signal);
+            Send(pid);
         }
 
         return delivered;
