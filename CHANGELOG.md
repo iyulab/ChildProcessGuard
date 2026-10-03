@@ -3,6 +3,20 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- `ProcessGuardian.TerminateProcessAsync(int processId, TimeSpan? timeout)` and `TerminateProcessAsync(Process process, TimeSpan? timeout)` terminate a single managed process with the same two-stage sequence as `KillAllProcessesAsync` (close request, wait, then forced tree kill). They return whether the process has exited, and `false` for a process that is not being managed.
+
+### Changed
+- `TerminateProcessesWhere` now uses the two-stage sequence instead of killing the process tree immediately, terminates the matched processes concurrently instead of one at a time, and honors `ForceKillOnTimeout`. The `timeout` argument is the wait after the close request, and the return value counts the matched processes that have exited.
+
+### Fixed
+- `Dispose`, `KillAllProcesses` and other blocking calls could deadlock when called on a thread with a single-threaded synchronization context (a WPF or Windows Forms UI thread), because the library's asynchronous continuations resumed on the caller's context. The library no longer captures the caller's synchronization context.
+
+### Deprecated
+- `ProcessStatus.Exited` and `ProcessStatistics.ExitedProcesses`. Processes are removed from management as soon as they exit, so the filter rarely matches anything and the count is almost always 0. Observe exits through the `ProcessLifecycleEvent` event instead.
+
 ## [1.2.1] - 2026-10-03
 
 ### Fixed

@@ -140,7 +140,7 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return await Task.Run(() => StartProcess(fileName, arguments, workingDirectory, environmentVariables), cancellationToken);
+        return await Task.Run(() => StartProcess(fileName, arguments, workingDirectory, environmentVariables), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -235,7 +235,7 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
             {
                 if (!processInfo.HasExited)
                 {
-                    await TerminateProcessAsync(processInfo, timeout.Value);
+                    await TerminateCoreAsync(processInfo, timeout.Value).ConfigureAwait(false);
                     Interlocked.Increment(ref successCount);
                 }
             }
@@ -246,7 +246,7 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
             }
         }));
 
-        await Task.WhenAll(tasks);
+        await Task.WhenAll(tasks).ConfigureAwait(false);
 
         // Clear the managed processes collection
         _managedProcesses.Clear();
@@ -290,15 +290,8 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
         if (process == null)
             throw new ArgumentNullException(nameof(process));
 
-        foreach (var kvp in _managedProcesses)
-        {
-            if (ReferenceEquals(kvp.Value.Process, process))
-            {
-                return Untrack(kvp.Value, ProcessLifecycleEventType.ProcessRemoved);
-            }
-        }
-
-        return false;
+        var processInfo = FindByProcess(process);
+        return processInfo != null && Untrack(processInfo, ProcessLifecycleEventType.ProcessRemoved);
     }
 
     /// <summary>
@@ -312,6 +305,48 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
 
         return _managedProcesses.TryGetValue(processId, out var processInfo)
             && Untrack(processInfo, ProcessLifecycleEventType.ProcessRemoved);
+    }
+
+    /// <summary>
+    /// Terminates a managed process and its descendants with the same sequence used by
+    /// <see cref="KillAllProcessesAsync"/>: a close request, a wait of up to <paramref name="timeout"/>,
+    /// then forced termination of the process tree when <see cref="ProcessGuardianOptions.ForceKillOnTimeout"/> is set.
+    /// </summary>
+    /// <param name="processId">The process ID</param>
+    /// <param name="timeout">How long to wait for the process to exit after the close request.
+    /// Defaults to <see cref="ProcessGuardianOptions.ProcessKillTimeout"/>.</param>
+    /// <returns>True if the process has exited when the call completes; false if no process with that ID
+    /// is being managed, or if it is still running.</returns>
+    public Task<bool> TerminateProcessAsync(int processId, TimeSpan? timeout = null)
+    {
+        ThrowIfDisposed();
+
+        return _managedProcesses.TryGetValue(processId, out var processInfo)
+            ? TerminateManagedAsync(processInfo, timeout)
+            : Task.FromResult(false);
+    }
+
+    /// <summary>
+    /// Terminates a managed process and its descendants; see <see cref="TerminateProcessAsync(int, TimeSpan?)"/>.
+    /// The process is matched by object identity, so this works even after the
+    /// <see cref="Process"/> instance has been disposed.
+    /// </summary>
+    /// <param name="process">The process to terminate</param>
+    /// <param name="timeout">How long to wait for the process to exit after the close request.
+    /// Defaults to <see cref="ProcessGuardianOptions.ProcessKillTimeout"/>.</param>
+    /// <returns>True if the process has exited when the call completes; false if it is not being
+    /// managed, or if it is still running.</returns>
+    public Task<bool> TerminateProcessAsync(Process process, TimeSpan? timeout = null)
+    {
+        ThrowIfDisposed();
+
+        if (process == null)
+            throw new ArgumentNullException(nameof(process));
+
+        var processInfo = FindByProcess(process);
+        return processInfo != null
+            ? TerminateManagedAsync(processInfo, timeout)
+            : Task.FromResult(false);
     }
 
     /// <summary>
@@ -496,7 +531,32 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
         }
     }
 
-    private async Task TerminateProcessAsync(ManagedProcessInfo processInfo, TimeSpan timeout)
+    private ManagedProcessInfo? FindByProcess(Process process)
+    {
+        foreach (var kvp in _managedProcesses)
+        {
+            if (ReferenceEquals(kvp.Value.Process, process))
+                return kvp.Value;
+        }
+
+        return null;
+    }
+
+    private async Task<bool> TerminateManagedAsync(ManagedProcessInfo processInfo, TimeSpan? timeout)
+    {
+        try
+        {
+            await TerminateCoreAsync(processInfo, timeout ?? _options.ProcessKillTimeout).ConfigureAwait(false);
+        }
+        catch (Exception) when (!_options.ThrowOnProcessOperationFailure)
+        {
+            // Already reported through the ProcessError event.
+        }
+
+        return processInfo.HasExited;
+    }
+
+    private async Task TerminateCoreAsync(ManagedProcessInfo processInfo, TimeSpan timeout)
     {
         if (processInfo.HasExited)
             return;
@@ -527,7 +587,7 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
                 using var cts = new CancellationTokenSource(timeout);
                 try
                 {
-                    await process.WaitForExitAsync(cts.Token);
+                    await process.WaitForExitAsync(cts.Token).ConfigureAwait(false);
                     OnProcessLifecycleEvent(processInfo, ProcessLifecycleEventType.ProcessExited);
                     return;
                 }
@@ -558,13 +618,13 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
                 }
 
                 // Give the OS a moment to reap the process after SIGKILL
-                await Task.Delay(150);
+                await Task.Delay(150).ConfigureAwait(false);
 
                 // Wait for the process to actually exit after force kill
                 try
                 {
                     using var killCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
-                    await process.WaitForExitAsync(killCts.Token);
+                    await process.WaitForExitAsync(killCts.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -844,8 +904,10 @@ public class ProcessStatistics
     public int RunningProcesses { get; }
 
     /// <summary>
-    /// Number of exited processes
+    /// Number of exited processes that are still being managed. A process leaves management as soon as
+    /// it exits, so this is almost always 0.
     /// </summary>
+    [Obsolete("Processes are removed from management as soon as they exit, so this is almost always 0. Use the ProcessLifecycleEvent event (ProcessExited) to observe exits.", false)]
     public int ExitedProcesses { get; }
 
     /// <summary>
@@ -866,7 +928,9 @@ public class ProcessStatistics
     {
         TotalProcesses = totalProcesses;
         RunningProcesses = runningProcesses;
+#pragma warning disable CS0618 // Obsolete property is still populated for existing callers
         ExitedProcesses = exitedProcesses;
+#pragma warning restore CS0618
         TotalMemoryUsage = totalMemoryUsage;
         AverageRuntime = averageRuntime;
     }

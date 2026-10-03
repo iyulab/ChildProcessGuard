@@ -29,7 +29,7 @@ public static class ProcessGuardianExtensions
 
         var tasks = processInfos.Select(async startInfo =>
         {
-            await semaphore.WaitAsync(cancellationToken);
+            await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 return guardian.StartProcessWithStartInfo(startInfo);
@@ -40,7 +40,7 @@ public static class ProcessGuardianExtensions
             }
         });
 
-        var results = await Task.WhenAll(tasks);
+        var results = await Task.WhenAll(tasks).ConfigureAwait(false);
         return results.ToList();
     }
 
@@ -69,7 +69,7 @@ public static class ProcessGuardianExtensions
                 .Where(p => !p.HasExited)
                 .Select(p => p.Process.WaitForExitAsync(cts.Token));
 
-            await Task.WhenAll(tasks);
+            await Task.WhenAll(tasks).ConfigureAwait(false);
             return true;
         }
         catch (OperationCanceledException)
@@ -96,7 +96,9 @@ public static class ProcessGuardianExtensions
         return status switch
         {
             ProcessStatus.Running => allProcesses.Where(p => !p.HasExited).ToList().AsReadOnly(),
+#pragma warning disable CS0618 // Obsolete member is still honored for existing callers
             ProcessStatus.Exited => allProcesses.Where(p => p.HasExited).ToList().AsReadOnly(),
+#pragma warning restore CS0618
             ProcessStatus.All => allProcesses,
             _ => throw new ArgumentException($"Unknown process status: {status}", nameof(status))
         };
@@ -122,12 +124,14 @@ public static class ProcessGuardianExtensions
     }
 
     /// <summary>
-    /// Terminates processes that match the specified predicate
+    /// Terminates the managed processes that match the specified predicate, concurrently, each with the
+    /// sequence of <see cref="ProcessGuardian.TerminateProcessAsync(Process, TimeSpan?)"/>.
     /// </summary>
     /// <param name="guardian">The ProcessGuardian instance</param>
     /// <param name="predicate">Predicate to match processes for termination</param>
-    /// <param name="timeout">Maximum time to wait for each process to terminate</param>
-    /// <returns>Number of processes terminated</returns>
+    /// <param name="timeout">How long to wait for each process to exit after its close request.
+    /// Defaults to <see cref="ProcessGuardianOptions.ProcessKillTimeout"/>.</param>
+    /// <returns>Number of matched processes that have exited</returns>
     public static async Task<int> TerminateProcessesWhere(
         this ProcessGuardian guardian,
         Func<ManagedProcessInfo, bool> predicate,
@@ -144,40 +148,12 @@ public static class ProcessGuardianExtensions
             .Where(p => !p.HasExited)
             .ToList();
 
-        int terminatedCount = 0;
-        var actualTimeout = timeout ?? guardian.Options.ProcessKillTimeout;
+        // Each termination starts with blocking native calls, so run them on the thread pool
+        // to terminate the matched processes concurrently rather than one after another.
+        var results = await Task.WhenAll(processesToTerminate.Select(processInfo =>
+            Task.Run(() => guardian.TerminateProcessAsync(processInfo.Process, timeout)))).ConfigureAwait(false);
 
-        foreach (var processInfo in processesToTerminate)
-        {
-            try
-            {
-                if (!processInfo.HasExited)
-                {
-                    processInfo.Process.KillProcessTree(entireProcessTree: true);
-
-                    using var cts = new CancellationTokenSource(actualTimeout);
-                    await processInfo.Process.WaitForExitAsync(cts.Token);
-
-                    terminatedCount++;
-                }
-
-                guardian.RemoveProcess(processInfo.Process);
-            }
-            catch (OperationCanceledException)
-            {
-                // Process didn't terminate within timeout
-            }
-            catch (InvalidOperationException)
-            {
-                // Process already disposed
-            }
-            catch (Exception)
-            {
-                // Error terminating process
-            }
-        }
-
-        return terminatedCount;
+        return results.Count(exited => exited);
     }
 
     /// <summary>
@@ -202,8 +178,10 @@ public enum ProcessStatus
     Running,
 
     /// <summary>
-    /// Exited processes
+    /// Exited processes that are still being managed. A process leaves management as soon as it exits,
+    /// so this rarely matches anything.
     /// </summary>
+    [Obsolete("Processes are removed from management as soon as they exit, so this filter rarely matches anything. Use the ProcessLifecycleEvent event (ProcessExited) to observe exits.", false)]
     Exited,
 
     /// <summary>

@@ -125,6 +125,37 @@ public class DisposalTests
     }
 
     [Fact]
+    [Trait("Category", "Process")]
+    public void Dispose_OnThreadWhoseSynchronizationContextIsBlocked_DoesNotDeadlock()
+    {
+        var guardian = new ProcessGuardian(new ProcessGuardianOptions
+        {
+            ProcessKillTimeout = TimeSpan.FromSeconds(2),
+        });
+        guardian.StartProcess(GetLongRunningExecutable(), GetLongRunningArguments());
+
+        // A UI thread that calls Dispose is blocked until Dispose returns, so any continuation the
+        // library posts back to that thread's context would never run.
+        var thread = new Thread(() =>
+        {
+            SynchronizationContext.SetSynchronizationContext(new BlockedSynchronizationContext());
+            guardian.Dispose();
+        })
+        { IsBackground = true };
+        thread.Start();
+
+        thread.Join(TimeSpan.FromSeconds(20)).Should().BeTrue("Dispose must not resume on the caller's synchronization context");
+    }
+
+    private sealed class BlockedSynchronizationContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            // Dropped: the owning thread is blocked and never gets to run posted work.
+        }
+    }
+
+    [Fact]
     public async Task DisposeWithLongRunningKill_ShouldEventuallyComplete()
     {
         // Arrange

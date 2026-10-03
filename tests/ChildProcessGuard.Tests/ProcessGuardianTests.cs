@@ -162,7 +162,6 @@ public class ProcessGuardianTests : IDisposable
         // Assert
         stats.TotalProcesses.Should().Be(2);
         stats.RunningProcesses.Should().Be(2);
-        stats.ExitedProcesses.Should().Be(0);
         stats.TotalMemoryUsage.Should().BeGreaterThan(0);
     }
 

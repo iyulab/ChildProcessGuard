@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using FluentAssertions;
 using Xunit;
+using static ChildProcessGuard.Tests.TestProcesses;
 
 namespace ChildProcessGuard.Tests;
 
@@ -244,5 +245,75 @@ public class ProcessLifecycleTests : IDisposable
         // must not throw on a disposed instance.
         _guardian.Invoking(g => g.RemoveProcess(process)).Should().NotThrow();
         _guardian.ManagedProcessCount.Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Category", "Fast")]
+    public async Task TerminateProcessAsync_WhenProcessIsNotManaged_ReturnsFalse()
+    {
+        _guardian = new ProcessGuardian(NoTimerOptions());
+        using var process = Process.GetCurrentProcess();
+
+        (await _guardian.TerminateProcessAsync(int.MaxValue)).Should().BeFalse();
+        (await _guardian.TerminateProcessAsync(process)).Should().BeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Process")]
+    public async Task TerminateProcessAsync_TerminatesOnlyThatProcess()
+    {
+        _guardian = new ProcessGuardian(NoTimerOptions());
+        using var target = _guardian.StartProcess(GetLongRunningExecutable(), GetLongRunningArguments());
+        using var other = _guardian.StartProcess(GetLongRunningExecutable(), GetLongRunningArguments());
+
+        var exited = await _guardian.TerminateProcessAsync(target, TimeSpan.FromSeconds(2));
+        await WaitUntilAsync(() => _guardian.ManagedProcessCount == 1, TimeSpan.FromSeconds(5));
+
+        exited.Should().BeTrue();
+        target.HasExited.Should().BeTrue();
+        other.HasExited.Should().BeFalse();
+        _guardian.GetProcessInfo(other.Id).Should().NotBeNull();
+        _guardian.ManagedProcessCount.Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Category", "Process")]
+    public async Task TerminateProcessAsync_ByProcessId_TerminatesTheProcess()
+    {
+        _guardian = new ProcessGuardian(NoTimerOptions());
+        using var process = _guardian.StartProcess(GetLongRunningExecutable(), GetLongRunningArguments());
+
+        var exited = await _guardian.TerminateProcessAsync(process.Id, TimeSpan.FromSeconds(2));
+
+        exited.Should().BeTrue();
+        process.HasExited.Should().BeTrue();
+    }
+
+    [Fact]
+    [Trait("Category", "Process")]
+    public async Task TerminateProcessesWhere_TerminatesMatchedProcessesOnly()
+    {
+        _guardian = new ProcessGuardian(NoTimerOptions());
+        var matched = new[]
+        {
+            _guardian.StartProcess(GetLongRunningExecutable(), GetLongRunningArguments()),
+            _guardian.StartProcess(GetLongRunningExecutable(), GetLongRunningArguments()),
+        };
+        using var unmatched = _guardian.StartProcess(GetLongRunningExecutable(), GetLongRunningArguments());
+        var matchedIds = matched.Select(p => p.Id).ToHashSet();
+
+        try
+        {
+            var terminated = await _guardian.TerminateProcessesWhere(info => matchedIds.Contains(info.Id), TimeSpan.FromSeconds(2));
+
+            terminated.Should().Be(2);
+            matched.Should().OnlyContain(p => p.HasExited);
+            unmatched.HasExited.Should().BeFalse();
+        }
+        finally
+        {
+            foreach (var process in matched)
+                process.Dispose();
+        }
     }
 }

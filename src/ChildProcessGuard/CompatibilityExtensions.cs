@@ -30,7 +30,7 @@ internal static class CompatibilityExtensions
 
                 // Small delay between checks to avoid excessive CPU usage
                 // Also gives the OS time to reap the process after a kill signal
-                await Task.Delay(50, cancellationToken);
+                await Task.Delay(50, cancellationToken).ConfigureAwait(false);
             }
             return;
         }
@@ -52,7 +52,7 @@ internal static class CompatibilityExtensions
 
             using (cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken)))
             {
-                await tcs.Task;
+                await tcs.Task.ConfigureAwait(false);
             }
         }
         finally

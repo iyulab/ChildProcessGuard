@@ -176,7 +176,9 @@ using var guardian = new ProcessGuardian();
 var process = guardian.StartProcess("worker.exe");
 
 // The returned Process belongs to the caller: read its exit code, wait on it, dispose it.
-// The guardian never disposes it for you.
+// The guardian never disposes it for you. Dispose it only after it has exited: the exit
+// notification that removes it from the managed list is not raised on a disposed instance,
+// so an entry disposed early stays until the next periodic cleanup.
 process.WaitForExit();
 Console.WriteLine($"Exit code: {process.ExitCode}");
 process.Dispose();
@@ -197,12 +199,15 @@ var cts = new CancellationTokenSource();
 // Start process asynchronously
 var process = await guardian.StartProcessAsync("myapp.exe", cancellationToken: cts.Token);
 
+// Terminate one process (close request, wait, then force) — true once it has exited
+bool exited = await guardian.TerminateProcessAsync(process, TimeSpan.FromSeconds(5));
+
 // Terminate all processes
 int terminated = await guardian.KillAllProcessesAsync(TimeSpan.FromSeconds(10));
 Console.WriteLine($"Terminated {terminated} processes");
 
 // Selective termination
-int killed = await guardian.TerminateProcessesWhere(
+int stopped = await guardian.TerminateProcessesWhere(
     p => p.GetRuntime() > TimeSpan.FromMinutes(5),
     TimeSpan.FromSeconds(5)
 );
@@ -302,7 +307,7 @@ using var custom = new ProcessGuardianBuilder()
 
 ### Termination Sequence
 
-`KillAllProcesses` and `Dispose` terminate each managed process in two stages (`TerminateProcessesWhere` goes straight to the forced stage):
+`TerminateProcessAsync`, `TerminateProcessesWhere`, `KillAllProcesses` and `Dispose` terminate each managed process in two stages; when several processes are terminated, they are terminated concurrently:
 
 1. **Graceful request.** Unix: `SIGTERM` to the process and its descendants. Windows: a close message to the process's main window (`CloseMainWindow`). If no request can be delivered — a Windows console process has no window — this stage is skipped rather than waited on.
 2. **Wait, then force.** If a request was delivered, the guardian waits up to `ProcessKillTimeout` (default 30 s) for the process to exit. If it is still running, or no request could be delivered, and `ForceKillOnTimeout` is `true` (default), the process tree is killed (`SIGKILL` on Unix, `TerminateProcess` on Windows). With `ForceKillOnTimeout = false` the process is left running after the graceful stage.

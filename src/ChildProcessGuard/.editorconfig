@@ -1,0 +1,6 @@
+root = false
+
+[*.cs]
+# Library code must not resume on the caller's synchronization context: Dispose and KillAllProcesses
+# block on asynchronous work, which deadlocks on a UI thread if a continuation is posted back to it.
+dotnet_diagnostic.CA2007.severity = error
