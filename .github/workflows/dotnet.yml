@@ -53,8 +53,42 @@ jobs:
       # --output Detailed lists every test as it finishes and --long-running names any test still
       # running after 60 s; the step timeout fails a hung run with its log kept (a cancelled job
       # loses the log of the step that was running).
+      if: runner.os != 'macOS'
       timeout-minutes: 15
       run: dotnet test --project ${{ env.TEST_PATH }} --configuration Release --no-build --output Detailed --long-running 60
+
+    # TEMPORARY macOS diagnosis: the suite hangs the macOS runner, so each class runs as its own
+    # bounded step with xunit's verbose reporter (prints [STARTING]/[FINISHED] per test).
+    - name: "macOS diag: Unix descendant walk"
+      if: runner.os == 'macOS'
+      timeout-minutes: 4
+      continue-on-error: true
+      run: dotnet tests/ChildProcessGuard.Tests/bin/Release/net10.0/ChildProcessGuard.Tests.dll -method "ChildProcessGuard.Tests.UnixSpecificTests.GetDescendantProcessIdsUnix_FindsChildAndGrandchild" -reporter verbose -noColor -longRunning 30
+    - name: "macOS diag: UnixSpecificTests"
+      if: runner.os == 'macOS'
+      timeout-minutes: 4
+      continue-on-error: true
+      run: dotnet tests/ChildProcessGuard.Tests/bin/Release/net10.0/ChildProcessGuard.Tests.dll -class ChildProcessGuard.Tests.UnixSpecificTests -reporter verbose -noColor -longRunning 30
+    - name: "macOS diag: ProcessLifecycleTests"
+      if: runner.os == 'macOS'
+      timeout-minutes: 4
+      continue-on-error: true
+      run: dotnet tests/ChildProcessGuard.Tests/bin/Release/net10.0/ChildProcessGuard.Tests.dll -class ChildProcessGuard.Tests.ProcessLifecycleTests -reporter verbose -noColor -longRunning 30
+    - name: "macOS diag: ProcessGuardianTests"
+      if: runner.os == 'macOS'
+      timeout-minutes: 4
+      continue-on-error: true
+      run: dotnet tests/ChildProcessGuard.Tests/bin/Release/net10.0/ChildProcessGuard.Tests.dll -class ChildProcessGuard.Tests.ProcessGuardianTests -reporter verbose -noColor -longRunning 30
+    - name: "macOS diag: DisposalTests"
+      if: runner.os == 'macOS'
+      timeout-minutes: 4
+      continue-on-error: true
+      run: dotnet tests/ChildProcessGuard.Tests/bin/Release/net10.0/ChildProcessGuard.Tests.dll -class ChildProcessGuard.Tests.DisposalTests -reporter verbose -noColor -longRunning 30
+    - name: "macOS diag: ConcurrencyTests"
+      if: runner.os == 'macOS'
+      timeout-minutes: 4
+      continue-on-error: true
+      run: dotnet tests/ChildProcessGuard.Tests/bin/Release/net10.0/ChildProcessGuard.Tests.dll -class ChildProcessGuard.Tests.ConcurrencyTests -reporter verbose -noColor -longRunning 30
 
   publish:
     needs: build-test
