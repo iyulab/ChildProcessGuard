@@ -3,7 +3,7 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.3.0] - 2026-10-03
 
 ### Added
 - `ProcessGuardian.TerminateProcessAsync(int processId, TimeSpan? timeout)` and `TerminateProcessAsync(Process process, TimeSpan? timeout)` terminate a single managed process with the same two-stage sequence as `KillAllProcessesAsync` (close request, wait, then forced tree kill). They return whether the process has exited, and `false` for a process that is not being managed.
