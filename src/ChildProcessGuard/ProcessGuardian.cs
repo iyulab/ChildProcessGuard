@@ -566,20 +566,24 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
             var process = processInfo.Process;
             LogMessage($"Terminating process: {processInfo}", LogLevel.Debug);
 
-            // Try graceful termination first: SIGTERM to the tree on Unix, a close message to the
-            // main window on Windows. The request only counts as delivered when the platform says so
-            // (a Windows console process has no window to close), and waiting for a process that was
-            // never asked to exit would just burn the timeout.
-            bool closeRequested;
-            try
+            // Try graceful termination first: the caller's own close request if one is configured,
+            // otherwise SIGTERM to the tree on Unix and a close message to the main window on Windows.
+            // The request only counts as delivered when it says so (a Windows console process has no
+            // window to close), and waiting for a process that was never asked to exit would just
+            // burn the timeout.
+            bool closeRequested = InvokeCloseRequest(processInfo);
+            if (!closeRequested)
             {
-                closeRequested = process.RequestTermination();
-            }
-            catch (InvalidOperationException)
-            {
-                // Process exited between HasExited check and CloseMainWindow
-                OnProcessLifecycleEvent(processInfo, ProcessLifecycleEventType.ProcessExited);
-                return;
+                try
+                {
+                    closeRequested = process.RequestTermination();
+                }
+                catch (InvalidOperationException)
+                {
+                    // Process exited between HasExited check and CloseMainWindow
+                    OnProcessLifecycleEvent(processInfo, ProcessLifecycleEventType.ProcessExited);
+                    return;
+                }
             }
 
             if (closeRequested)
@@ -638,6 +642,31 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
         {
             OnProcessError("TerminateProcess", ex, processInfo.Id);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Calls the configured close request. A failing callback must not stop the termination it is
+    /// part of, so its exception is reported and the built-in request is used instead.
+    /// </summary>
+    /// <returns>Whether the callback delivered a close request</returns>
+    private bool InvokeCloseRequest(ManagedProcessInfo processInfo)
+    {
+        var closeRequest = _options.CloseRequest;
+        if (closeRequest == null)
+            return false;
+
+        try
+        {
+            return closeRequest(processInfo);
+        }
+        catch (Exception ex)
+        {
+            // A request that failed because the process exited in the meantime is not an error
+            if (!processInfo.HasExited)
+                OnProcessError("CloseRequest", ex, processInfo.Id);
+
+            return false;
         }
     }
 

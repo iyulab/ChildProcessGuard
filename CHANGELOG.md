@@ -3,6 +3,11 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- `ProcessGuardianOptions.CloseRequest` and `ProcessGuardianBuilder.WithCloseRequest` let the caller supply the close request of the graceful termination stage — for example closing a console child's standard input or sending it a quit command. When the callback returns `true`, the guardian waits up to `ProcessKillTimeout` and then forces the tree as before; when it returns `false` or throws, the built-in request (`SIGTERM` on Unix, `CloseMainWindow` on Windows) is used. It applies to `TerminateProcessAsync`, `TerminateProcessesWhere`, `KillAllProcesses` and `Dispose`.
+
 ## [1.3.1] - 2026-10-04
 
 ### Fixed

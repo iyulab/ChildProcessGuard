@@ -9,7 +9,7 @@ namespace ChildProcessGuard.Tests;
 /// <summary>
 /// Tests for the managed-process table lifecycle: registration, pid reuse, exit reaping,
 /// removal, and ownership of the returned <see cref="Process"/> instances.
-/// Tests tagged Category=Process start real child processes and are excluded from the CI filter.
+/// Tests tagged Category=Process start real child processes.
 /// </summary>
 public class ProcessLifecycleTests : IDisposable
 {

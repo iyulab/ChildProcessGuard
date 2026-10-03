@@ -282,6 +282,18 @@ public class ProcessGuardianBuilder
     }
 
     /// <summary>
+    /// Sets a custom close request for the graceful termination stage
+    /// </summary>
+    /// <param name="closeRequest">Asks a process to exit and returns whether the request was delivered.
+    /// See <see cref="ProcessGuardianOptions.CloseRequest"/>.</param>
+    /// <returns>Builder instance</returns>
+    public ProcessGuardianBuilder WithCloseRequest(Func<ManagedProcessInfo, bool> closeRequest)
+    {
+        _options.CloseRequest = closeRequest ?? throw new ArgumentNullException(nameof(closeRequest));
+        return this;
+    }
+
+    /// <summary>
     /// Enables or disables throwing exceptions on process operation failures
     /// </summary>
     /// <param name="enabled">Whether to throw on failures</param>

@@ -231,6 +231,24 @@ var options = new ProcessGuardianOptions
 using var guardian = new ProcessGuardian(options);
 ```
 
+### Custom Close Request
+
+The built-in graceful request is `SIGTERM` on Unix and a window close message on Windows, so a Windows console process — which has no window — is killed without being asked first. When you know how your child prefers to be asked to exit, supply that request:
+
+```csharp
+using var guardian = new ProcessGuardianBuilder()
+    .WithKillTimeout(TimeSpan.FromSeconds(10))
+    .WithCloseRequest(info =>
+    {
+        // The child exits when its standard input ends (started with RedirectStandardInput = true)
+        info.Process.StandardInput.Close();
+        return true; // delivered: wait up to the kill timeout, then force
+    })
+    .Build();
+```
+
+Return `false` to fall back to the built-in request for that process. The callback should only deliver the request, not wait for the exit — the guardian does the waiting. See [Termination Sequence](#termination-sequence).
+
 ### Cross-Platform Example
 
 ```csharp
@@ -267,7 +285,8 @@ var options = new ProcessGuardianOptions
     AutoCleanupDisposedProcesses = true,                // Fallback sweep for exited processes
     CleanupInterval = TimeSpan.FromMinutes(5),          // Interval of the fallback sweep
     ThrowOnProcessOperationFailure = false,             // Exception handling behavior
-    LogAction = msg => Console.WriteLine(msg)           // Custom log handler (optional)
+    LogAction = msg => Console.WriteLine(msg),          // Custom log handler (optional)
+    CloseRequest = null                                 // Custom graceful close request (optional)
 };
 
 using var guardian = new ProcessGuardian(options);
@@ -309,7 +328,7 @@ using var custom = new ProcessGuardianBuilder()
 
 `TerminateProcessAsync`, `TerminateProcessesWhere`, `KillAllProcesses` and `Dispose` terminate each managed process in two stages; when several processes are terminated, they are terminated concurrently:
 
-1. **Graceful request.** Unix: `SIGTERM` to the process and its descendants. Windows: a close message to the process's main window (`CloseMainWindow`). If no request can be delivered — a Windows console process has no window — this stage is skipped rather than waited on.
+1. **Graceful request.** If `CloseRequest` is set, it is called first; when it returns `true` the request counts as delivered and the built-in request is not sent. Otherwise — no callback, or it returned `false` or threw (reported through `ProcessError`) — Unix: `SIGTERM` to the process and its descendants; Windows: a close message to the process's main window (`CloseMainWindow`). If no request can be delivered — a Windows console process has no window — this stage is skipped rather than waited on.
 2. **Wait, then force.** If a request was delivered, the guardian waits up to `ProcessKillTimeout` (default 30 s) for the process to exit. If it is still running, or no request could be delivered, and `ForceKillOnTimeout` is `true` (default), the process tree is killed (`SIGKILL` on Unix, `TerminateProcess` on Windows). With `ForceKillOnTimeout = false` the process is left running after the graceful stage.
 
 On Windows, processes assigned to the Job Object are additionally terminated by the kernel when the guardian's job handle closes, including on abnormal parent exit.

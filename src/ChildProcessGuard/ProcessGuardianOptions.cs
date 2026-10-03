@@ -58,6 +58,28 @@ public class ProcessGuardianOptions
     public Action<string>? LogAction { get; set; }
 
     /// <summary>
+    /// Custom close request for the graceful termination stage. If set, it is called first when a
+    /// managed process is terminated, and should ask the process to exit in a way the process
+    /// understands — closing its standard input, writing a quit command, or calling a shutdown
+    /// endpoint — without waiting for it to exit.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Return <c>true</c> when the request was delivered: the guardian then waits up to
+    /// <see cref="ProcessKillTimeout"/> for the process to exit, and forces the process tree to
+    /// terminate if it is still running and <see cref="ForceKillOnTimeout"/> is set. The built-in
+    /// request (<c>SIGTERM</c> to the process tree on Unix, <c>CloseMainWindow</c> on Windows) is not
+    /// sent in that case. Return <c>false</c> to fall back to the built-in request.
+    /// </para>
+    /// <para>
+    /// An exception thrown by the callback is treated as <c>false</c> and, unless the process has
+    /// exited in the meantime, reported through the <see cref="ProcessGuardian.ProcessError"/> event. The callback can be called from a thread-pool thread, for
+    /// several processes at once, and during <see cref="ProcessGuardian.Dispose()"/>.
+    /// </para>
+    /// </remarks>
+    public Func<ManagedProcessInfo, bool>? CloseRequest { get; set; }
+
+    /// <summary>
     /// Creates a default configuration
     /// </summary>
     /// <returns>Default ProcessGuardianOptions</returns>
@@ -104,7 +126,8 @@ public class ProcessGuardianOptions
             AutoCleanupDisposedProcesses = this.AutoCleanupDisposedProcesses,
             CleanupInterval = this.CleanupInterval,
             ThrowOnProcessOperationFailure = this.ThrowOnProcessOperationFailure,
-            LogAction = this.LogAction
+            LogAction = this.LogAction,
+            CloseRequest = this.CloseRequest
         };
     }
 }
