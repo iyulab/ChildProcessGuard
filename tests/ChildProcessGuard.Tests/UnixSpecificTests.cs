@@ -2,7 +2,6 @@
 // ProcessStartInfo.ArgumentList, so the whole class is excluded there.
 #if !NETFRAMEWORK
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using FluentAssertions;
 using Xunit;
 using static ChildProcessGuard.Tests.TestProcesses;
@@ -21,11 +20,9 @@ public class UnixSpecificTests : IDisposable
         _guardian?.Dispose();
     }
 
-    [SkippableFact]
+    [Fact(SkipWhen = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires a Unix platform")]
     public void ProcessGuardianInitialization_OnUnix_ShouldSucceed()
     {
-        Skip.If(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
-
         // Arrange & Act
         _guardian = new ProcessGuardian();
 
@@ -34,11 +31,9 @@ public class UnixSpecificTests : IDisposable
         _guardian.IsDisposed.Should().BeFalse();
     }
 
-    [SkippableFact]
+    [Fact(SkipWhen = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires a Unix platform")]
     public void ProcessStart_OnUnix_ShouldUseManualTracking()
     {
-        Skip.If(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
-
         // Arrange
         _guardian = new ProcessGuardian();
 
@@ -51,15 +46,13 @@ public class UnixSpecificTests : IDisposable
         processInfo!.IsManaged.Should().BeTrue();
     }
 
-    [SkippableFact]
+    [Fact(SkipWhen = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires a Unix platform")]
     public async Task GracefulTermination_OnUnix_DeliversSIGTERM()
     {
-        Skip.If(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
-
         // Arrange - a child that exits cleanly on SIGTERM; SIGKILL would leave a non-zero exit code
         _guardian = new ProcessGuardian();
         var process = StartShell("trap 'exit 0' TERM; sleep 60 & wait");
-        await Task.Delay(200); // let the shell install its trap
+        await Task.Delay(200, TestContext.Current.CancellationToken); // let the shell install its trap
 
         // Act
         var terminatedCount = await _guardian.KillAllProcessesAsync(TimeSpan.FromSeconds(5));
@@ -70,11 +63,9 @@ public class UnixSpecificTests : IDisposable
         process.ExitCode.Should().Be(0, "the child should have exited from its SIGTERM trap, not from SIGKILL");
     }
 
-    [SkippableFact]
+    [Fact(SkipWhen = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires a Unix platform")]
     public async Task ForcedTermination_OnUnix_KillsDescendants_AndSparesTheCaller()
     {
-        Skip.If(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
-
         // Arrange - root and grandchild shells both ignore SIGTERM; the grandchild's pid is reported on stdout
         _guardian = new ProcessGuardian(new ProcessGuardianOptions
         {
@@ -85,23 +76,21 @@ public class UnixSpecificTests : IDisposable
             "trap '' TERM; sh -c 'trap \"\" TERM; while :; do sleep 1; done' & echo $!; wait",
             redirectStandardOutput: true);
         var grandchildPid = int.Parse(process.StandardOutput.ReadLine()!);
-        await Task.Delay(200);
+        await Task.Delay(200, TestContext.Current.CancellationToken);
 
         // Act
         await _guardian.KillAllProcessesAsync();
 
         // Assert - the tree is gone and this process is still here to observe it
         process.WaitForExit(2000).Should().BeTrue();
-        await Task.Delay(300);
+        await Task.Delay(300, TestContext.Current.CancellationToken);
         var grandchildAlive = () => Process.GetProcessById(grandchildPid);
         grandchildAlive.Should().Throw<ArgumentException>("the grandchild shell should have been killed with the tree");
     }
 
-    [SkippableFact]
+    [Fact(SkipWhen = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires a Unix platform")]
     public void SignalProcessTreeUnix_WithSIGKILL_KillsRootAndDescendants()
     {
-        Skip.If(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
-
         // Exercises the portable tree kill directly, independent of the runtime's Kill(entireProcessTree).
         using var process = Process.Start(new ProcessStartInfo("/bin/sh")
         {
@@ -120,11 +109,9 @@ public class UnixSpecificTests : IDisposable
         grandchildAlive.Should().Throw<ArgumentException>();
     }
 
-    [SkippableFact]
+    [Fact(SkipWhen = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires a Unix platform")]
     public async Task MultipleProcesses_OnUnix_ShouldAllBeTerminated()
     {
-        Skip.If(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
-
         // Arrange
         _guardian = new ProcessGuardian();
         var process1 = _guardian.StartProcess("/bin/sleep", "60");
@@ -137,18 +124,16 @@ public class UnixSpecificTests : IDisposable
         // Assert
         terminatedCount.Should().Be(3);
 
-        await Task.Delay(500);
+        await Task.Delay(500, TestContext.Current.CancellationToken);
 
         process1.HasExited.Should().BeTrue();
         process2.HasExited.Should().BeTrue();
         process3.HasExited.Should().BeTrue();
     }
 
-    [SkippableFact]
+    [Fact(SkipWhen = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires a Unix platform")]
     public void ProcessWithCustomWorkingDirectory_OnUnix_ShouldStart()
     {
-        Skip.If(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
-
         // Arrange
         _guardian = new ProcessGuardian();
         var workingDir = "/tmp";
@@ -164,11 +149,9 @@ public class UnixSpecificTests : IDisposable
         processInfo!.WorkingDirectory.Should().Be(workingDir);
     }
 
-    [SkippableFact]
+    [Fact(SkipWhen = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires a Unix platform")]
     public void ProcessWithEnvironmentVariables_OnUnix_ShouldPassVariables()
     {
-        Skip.If(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
-
         // Arrange
         _guardian = new ProcessGuardian();
         var envVars = new Dictionary<string, string>
@@ -186,11 +169,9 @@ public class UnixSpecificTests : IDisposable
         processInfo.EnvironmentVariables!["TEST_VAR"].Should().Be("test_value");
     }
 
-    [SkippableFact]
+    [Fact(SkipWhen = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires a Unix platform")]
     public async Task Dispose_OnUnix_ShouldCleanupAllProcesses()
     {
-        Skip.If(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
-
         // Arrange
         _guardian = new ProcessGuardian();
         var process = _guardian.StartProcess("/bin/sleep", "60");
@@ -203,7 +184,7 @@ public class UnixSpecificTests : IDisposable
         _guardian.IsDisposed.Should().BeTrue();
 
         // Wait for cleanup
-        await Task.Delay(1000);
+        await Task.Delay(1000, TestContext.Current.CancellationToken);
 
         var stillRunning = IsProcessRunning(processId);
         stillRunning.Should().BeFalse("Process should be terminated on Dispose");

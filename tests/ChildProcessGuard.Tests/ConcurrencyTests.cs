@@ -31,7 +31,7 @@ public class ConcurrencyTests : IDisposable
 
         // Act
         var tasks = Enumerable.Range(0, 20)
-            .Select(_ => Task.Run(() => _guardian.StartProcess(executable, GetLongRunningArguments())))
+            .Select(_ => Task.Run(() => _guardian.StartProcess(executable, GetLongRunningArguments()), TestContext.Current.CancellationToken))
             .ToArray();
 
         var processes = await Task.WhenAll(tasks);
@@ -62,7 +62,7 @@ public class ConcurrencyTests : IDisposable
 
         // Act - Kill processes concurrently
         var killTasks = Enumerable.Range(0, 5)
-            .Select(_ => Task.Run(() => _guardian.KillAllProcessesAsync(TimeSpan.FromSeconds(2))))
+            .Select(_ => Task.Run(() => _guardian.KillAllProcessesAsync(TimeSpan.FromSeconds(2)), TestContext.Current.CancellationToken))
             .ToArray();
 
         var killResults = await Task.WhenAll(killTasks);
@@ -91,14 +91,14 @@ public class ConcurrencyTests : IDisposable
                 try
                 {
                     var stats = _guardian.GetStatistics();
-                    await Task.Delay(10);
+                    await Task.Delay(10, TestContext.Current.CancellationToken);
                 }
                 catch (Exception ex)
                 {
                     errors.Add(ex);
                 }
             }
-        });
+        }, TestContext.Current.CancellationToken);
 
         var startTask = Task.Run(async () =>
         {
@@ -107,14 +107,14 @@ public class ConcurrencyTests : IDisposable
                 try
                 {
                     _guardian.StartProcess(executable, GetTestArguments());
-                    await Task.Delay(50);
+                    await Task.Delay(50, TestContext.Current.CancellationToken);
                 }
                 catch (Exception ex)
                 {
                     errors.Add(ex);
                 }
             }
-        });
+        }, TestContext.Current.CancellationToken);
 
         await Task.WhenAll(statsTask, startTask);
 
@@ -141,7 +141,7 @@ public class ConcurrencyTests : IDisposable
                 {
                     // Should not throw
                 }
-            }))
+            }, TestContext.Current.CancellationToken))
             .ToArray();
 
         await Task.WhenAll(disposeTasks);
@@ -195,7 +195,7 @@ public class ConcurrencyTests : IDisposable
                 try
                 {
                     var process = await _guardian.StartProcessAsync(executable, GetTestArguments());
-                    await Task.Delay(10);
+                    await Task.Delay(10, TestContext.Current.CancellationToken);
                     return process;
                 }
                 finally
@@ -247,7 +247,7 @@ public class ConcurrencyTests : IDisposable
                     errors.Add(ex);
                 }
             }
-        });
+        }, TestContext.Current.CancellationToken);
 
         var removeTask = Task.Run(() =>
         {
@@ -264,7 +264,7 @@ public class ConcurrencyTests : IDisposable
                     errors.Add(ex);
                 }
             }
-        });
+        }, TestContext.Current.CancellationToken);
 
         await Task.WhenAll(enumerateTask, removeTask);
 

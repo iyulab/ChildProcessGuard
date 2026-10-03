@@ -27,7 +27,7 @@ public class DisposalTests
         guardian.Dispose();
 
         // Wait for processes to terminate
-        await Task.Delay(1500);
+        await Task.Delay(1500, TestContext.Current.CancellationToken);
 
         // Assert
         guardian.IsDisposed.Should().BeTrue();
@@ -139,8 +139,8 @@ public class DisposalTests
         guardian.StartProcess(GetLongRunningExecutable(), GetLongRunningArguments());
 
         // Act
-        var disposeTask = Task.Run(() => guardian.Dispose());
-        var completed = await Task.WhenAny(disposeTask, Task.Delay(TimeSpan.FromSeconds(10)));
+        var disposeTask = Task.Run(() => guardian.Dispose(), TestContext.Current.CancellationToken);
+        var completed = await Task.WhenAny(disposeTask, Task.Delay(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
 
         // Assert
         completed.Should().Be(disposeTask, "Dispose should complete within timeout");
@@ -180,7 +180,7 @@ public class DisposalTests
 
         // Start and let a process exit
         var process = guardian.StartProcess(GetShortLivedExecutable(), GetShortLivedArguments());
-        await Task.Delay(500); // Wait for process to exit
+        await Task.Delay(500, TestContext.Current.CancellationToken); // Wait for process to exit
 
         // Act
         guardian.Dispose();
@@ -189,7 +189,7 @@ public class DisposalTests
         guardian.IsDisposed.Should().BeTrue();
 
         // Wait a bit to ensure timer doesn't fire after disposal
-        await Task.Delay(300);
+        await Task.Delay(300, TestContext.Current.CancellationToken);
 
         // If timer wasn't disposed, it might cause issues (hard to test directly)
         Assert.True(true);

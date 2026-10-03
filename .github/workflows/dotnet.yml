@@ -5,6 +5,7 @@ on:
     branches: [ "main" ]
     paths:
       - 'Directory.Build.props'
+      - 'global.json'
       - 'src/**'
       - 'tests/**'
       - 'README.md'
@@ -46,8 +47,9 @@ jobs:
 
     # The whole suite runs here, including tests that start real child processes and the
     # platform-specific tests, so both termination paths are exercised on their own OS.
+    # global.json selects Microsoft.Testing.Platform as the dotnet test runner (xunit.v3).
     - name: Test
-      run: dotnet test ${{ env.TEST_PATH }} --configuration Release --no-build --verbosity normal
+      run: dotnet test --project ${{ env.TEST_PATH }} --configuration Release --no-build
 
   publish:
     needs: build-test

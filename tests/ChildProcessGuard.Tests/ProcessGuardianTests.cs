@@ -83,7 +83,7 @@ public class ProcessGuardianTests : IDisposable
         var arguments = GetLongRunningArguments();
 
         // Act
-        var process = await _guardian.StartProcessAsync(executable, arguments);
+        var process = await _guardian.StartProcessAsync(executable, arguments, cancellationToken: TestContext.Current.CancellationToken);
 
         // Assert
         process.Should().NotBeNull();
@@ -135,7 +135,7 @@ public class ProcessGuardianTests : IDisposable
         _guardian.ManagedProcessCount.Should().Be(0);
 
         // Wait a bit for processes to fully terminate
-        await Task.Delay(500);
+        await Task.Delay(500, TestContext.Current.CancellationToken);
 
         process1.HasExited.Should().BeTrue();
         process2.HasExited.Should().BeTrue();
@@ -155,7 +155,7 @@ public class ProcessGuardianTests : IDisposable
         var process2 = _guardian.StartProcess(executable, arguments);
 
         // Give processes time to fully start
-        await Task.Delay(100);
+        await Task.Delay(100, TestContext.Current.CancellationToken);
 
         var stats = _guardian.GetStatistics();
 
@@ -291,7 +291,7 @@ public class ProcessGuardianTests : IDisposable
 
         // Act
         var process = _guardian.StartProcess(GetShortLivedExecutable(), GetShortLivedArguments());
-        await Task.Delay(2000); // Wait for process to exit
+        await Task.Delay(2000, TestContext.Current.CancellationToken); // Wait for process to exit
 
         // Assert
         exitEvent.Should().NotBeNull();

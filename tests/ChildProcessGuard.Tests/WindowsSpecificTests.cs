@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using FluentAssertions;
 using Xunit;
 using static ChildProcessGuard.Tests.TestProcesses;
@@ -18,11 +17,9 @@ public class WindowsSpecificTests : IDisposable
         _guardian?.Dispose();
     }
 
-    [SkippableFact]
+    [Fact(SkipUnless = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires Windows")]
     public void JobObjectInitialization_OnWindows_ShouldSucceed()
     {
-        Skip.IfNot(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
-
         // Arrange & Act
         _guardian = new ProcessGuardian();
 
@@ -31,11 +28,9 @@ public class WindowsSpecificTests : IDisposable
         _guardian.IsDisposed.Should().BeFalse();
     }
 
-    [SkippableFact]
+    [Fact(SkipUnless = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires Windows")]
     public void ProcessAssignment_ToJobObject_ShouldRaiseEvent()
     {
-        Skip.IfNot(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
-
         // Arrange
         _guardian = new ProcessGuardian();
         ProcessLifecycleEventArgs? jobAssignedEvent = null;
@@ -62,11 +57,9 @@ public class WindowsSpecificTests : IDisposable
         processInfo!.IsJobAssigned.Should().BeTrue("Process should be assigned to Job Object");
     }
 
-    [SkippableFact]
+    [Fact(SkipUnless = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires Windows")]
     public async Task JobObject_ShouldTerminateChildrenOnDisposal()
     {
-        Skip.IfNot(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
-
         // Arrange
         _guardian = new ProcessGuardian();
         var process = _guardian.StartProcess("ping", "localhost -n 100");
@@ -80,18 +73,16 @@ public class WindowsSpecificTests : IDisposable
         await _guardian.DisposeAsync();
 
         // Wait for cleanup
-        await Task.Delay(500);
+        await Task.Delay(500, TestContext.Current.CancellationToken);
 
         // Assert - Process should be terminated
         var stillRunning = IsProcessRunning(processId);
         stillRunning.Should().BeFalse("Process should be terminated when guardian is disposed");
     }
 
-    [SkippableFact]
+    [Fact(SkipUnless = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires Windows")]
     public void JobObjectFailure_WithStrictMode_ShouldProvideDetails()
     {
-        Skip.IfNot(RuntimeInformation.IsOSPlatform(OSPlatform.Windows));
-
         // Arrange
         var options = new ProcessGuardianOptions
         {

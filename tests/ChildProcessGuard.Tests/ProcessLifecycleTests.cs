@@ -45,7 +45,7 @@ public class ProcessLifecycleTests : IDisposable
         var deadline = DateTime.UtcNow + timeout;
         while (!condition() && DateTime.UtcNow < deadline)
         {
-            await Task.Delay(20);
+            await Task.Delay(20, TestContext.Current.CancellationToken);
         }
     }
 
@@ -202,7 +202,7 @@ public class ProcessLifecycleTests : IDisposable
         using var process = _guardian.StartProcessWithStartInfo(ShortLivedChild());
         process.WaitForExit();
         await WaitUntilAsync(() => _guardian.ManagedProcessCount == 0, TimeSpan.FromSeconds(5));
-        await Task.Delay(200); // let at least one cleanup sweep run after the exit
+        await Task.Delay(200, TestContext.Current.CancellationToken); // let at least one cleanup sweep run after the exit
 
         process.Invoking(p => p.ExitCode).Should().NotThrow();
         process.ExitCode.Should().Be(0);
