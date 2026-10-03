@@ -17,13 +17,12 @@ A cross-platform .NET library that ensures child processes automatically termina
 - **Process Monitoring**: Real-time statistics and lifecycle events
 - **Batch Processing**: Start multiple processes with concurrency control
 - **Thread-Safe**: Supports concurrent operations
-- **Graceful Shutdown**: Configurable timeout and fallback mechanisms
+- **Graceful Shutdown**: Two-stage termination with a configurable timeout and a pluggable close request
 - **Custom Logging**: Pluggable log action delegate
 
 ## Requirements
 
 - .NET Standard 2.0+ / .NET Framework 4.6.1+ / .NET Core 2.0+ / .NET 5+
-- .NET 10.0+
 
 ### Supported Runtimes
 
