@@ -67,25 +67,14 @@ jobs:
         sysctl kern.maxproc kern.maxprocperuid
         ulimit -u
         ps -A | wc -l
-    - name: "macOS diag: net9.0 whole suite as nobody, process count sampled"
-      if: runner.os == 'macOS'
-      timeout-minutes: 6
-      continue-on-error: true
-      run: |
-        sudo chmod o+x "$HOME" "$(dirname "$GITHUB_WORKSPACE")" "$(dirname "$DOTNET_ROOT")" || true
-        sudo chmod -R o+rX "$GITHUB_WORKSPACE" "$DOTNET_ROOT" || true
-        ( max=0; while sleep 0.2; do n=$(ps -U nobody -o pid= | wc -l); [ $n -gt $max ] && max=$n && echo "[sampler] nobody processes: $max"; done ) &
-        sampler=$!
-        sudo -u nobody env HOME=/tmp TMPDIR=/tmp DOTNET_CLI_HOME=/tmp DOTNET_ROOT="$DOTNET_ROOT" PATH="$PATH" "$DOTNET_ROOT/dotnet" tests/ChildProcessGuard.Tests/bin/Release/net9.0/ChildProcessGuard.Tests.dll -noColor
-        kill $sampler
     - name: "macOS diag: runner processes before"
       if: runner.os == 'macOS'
       run: ps -U "$(id -u)" -o pid,ppid,pgid,stat,comm
-    - name: "macOS diag: net9.0 whole suite as runner, serial"
+    - name: "macOS diag: net9.0 whole suite as runner, parallel, signals traced and interlocked"
       if: runner.os == 'macOS'
       timeout-minutes: 5
       continue-on-error: true
-      run: dotnet tests/ChildProcessGuard.Tests/bin/Release/net9.0/ChildProcessGuard.Tests.dll -parallel none -reporter verbose -noColor
+      run: CPG_TRACE_SIGNALS=1 dotnet tests/ChildProcessGuard.Tests/bin/Release/net9.0/ChildProcessGuard.Tests.dll -reporter verbose -noColor 2>&1 | grep -E "cpg-signal|SUMMARY|Total:|FAIL" 
     - name: "macOS diag: after"
       if: always() && runner.os == 'macOS'
       run: |

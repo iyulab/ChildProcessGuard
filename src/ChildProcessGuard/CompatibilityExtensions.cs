@@ -99,6 +99,8 @@ internal static class CompatibilityExtensions
 #if NET5_0_OR_GREATER
             try
             {
+                if (Environment.GetEnvironmentVariable("CPG_TRACE_SIGNALS") == "1")
+                    Console.Error.WriteLine($"[cpg-signal] runtime Kill(entireProcessTree) self={Process.GetCurrentProcess().Id} root={process.Id} exited={process.HasExited}");
                 process.Kill(entireProcessTree: true);
                 return;
             }
@@ -292,6 +294,14 @@ internal static class CompatibilityExtensions
         var trace = Environment.GetEnvironmentVariable("CPG_TRACE_SIGNALS") == "1";
         int Send(int pid)
         {
+            if (trace && !IsDescendantOfCurrentProcessForTrace(pid))
+            {
+                string blockedName;
+                try { using var p = Process.GetProcessById(pid); blockedName = p.ProcessName; } catch { blockedName = "?"; }
+                Console.Error.WriteLine($"[cpg-signal] BLOCKED foreign target self={Process.GetCurrentProcess().Id} root={rootProcessId} pid={pid} {blockedName} signal={signal} descendants=[{string.Join(",", descendants)}] stack: " + new StackTrace(1, false).ToString().Replace(Environment.NewLine, " | "));
+                return -1;
+            }
+
             var rc = NativeMethods.SendSignal(pid, signal);
             if (trace)
             {
@@ -313,6 +323,24 @@ internal static class CompatibilityExtensions
         }
 
         return delivered;
+    }
+
+    // TEMPORARY diagnosis: true if pid descends from the current process in a fresh snapshot.
+    private static bool IsDescendantOfCurrentProcessForTrace(int pid)
+    {
+        var self = Process.GetCurrentProcess().Id;
+        var parentOf = new Dictionary<int, int>();
+        foreach (var pair in GetChildrenByParentUnix())
+            foreach (var child in pair.Value)
+                parentOf[child] = pair.Key;
+
+        for (var current = pid; current > 1 && parentOf.TryGetValue(current, out var parent); current = parent)
+        {
+            if (parent == self)
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
