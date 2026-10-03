@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
@@ -86,8 +87,8 @@ internal static class CompatibilityExtensions
         }
 
 #if NET5_0_OR_GREATER
-        // The runtime's own implementation enumerates descendants on every supported OS; the
-        // portable fallback below can only walk /proc, so it is Linux-complete but root-only on macOS.
+        // Prefer the runtime's own implementation; the portable fallback below enumerates
+        // descendants itself (ToolHelp32 on Windows, /proc on Linux, libproc on macOS).
         try
         {
             process.Kill(entireProcessTree: true);
@@ -293,7 +294,7 @@ internal static class CompatibilityExtensions
     /// <returns>True if the signal was delivered to the root process</returns>
     internal static bool SignalProcessTreeUnix(int rootProcessId, int signal)
     {
-        var descendants = GetChildProcessIdsUnix(rootProcessId);
+        var descendants = GetDescendantProcessIdsUnix(rootProcessId);
 
         var delivered = NativeMethods.SendSignal(rootProcessId, signal) == 0;
 
@@ -306,163 +307,145 @@ internal static class CompatibilityExtensions
     }
 
     /// <summary>
-    /// Gets child processes of a given process (helper method)
+    /// Gets the IDs of every descendant of a process on Unix, walked from a single snapshot of the
+    /// process table (Linux: /proc; macOS: libproc), the same sources the runtime uses.
     /// </summary>
-    /// <param name="parentId">Parent process ID</param>
-    /// <returns>List of child process IDs</returns>
-    public static List<int> GetChildProcessIds(int parentId)
+    /// <param name="rootProcessId">Process ID of the tree root</param>
+    /// <returns>Descendant process IDs, parents before their children; empty if the table cannot be read</returns>
+    private static List<int> GetDescendantProcessIdsUnix(int rootProcessId)
     {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        var descendants = new List<int>();
+
+        Dictionary<int, List<int>> childrenByParent;
+        try
         {
-            return GetChildProcessIdsNative(parentId);
+            childrenByParent = GetChildrenByParentUnix();
         }
-        else
+        catch
         {
-            // Unix: Use /proc filesystem for better performance
-            return GetChildProcessIdsUnix(parentId);
+            return descendants;
+        }
+
+        var visited = new HashSet<int> { rootProcessId };
+        var pending = new Queue<int>();
+        pending.Enqueue(rootProcessId);
+
+        while (pending.Count > 0)
+        {
+            if (!childrenByParent.TryGetValue(pending.Dequeue(), out var children))
+                continue;
+
+            foreach (var child in children)
+            {
+                if (visited.Add(child))
+                {
+                    descendants.Add(child);
+                    pending.Enqueue(child);
+                }
+            }
+        }
+
+        return descendants;
+    }
+
+    private static Dictionary<int, List<int>> GetChildrenByParentUnix()
+    {
+        var parentPids = RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+            ? EnumerateParentPidsMacOS()
+            : EnumerateParentPidsProcFs();
+
+        var childrenByParent = new Dictionary<int, List<int>>();
+        foreach (var (pid, parentPid) in parentPids)
+        {
+            if (!childrenByParent.TryGetValue(parentPid, out var children))
+            {
+                children = new List<int>();
+                childrenByParent[parentPid] = children;
+            }
+
+            children.Add(pid);
+        }
+
+        return childrenByParent;
+    }
+
+    private static IEnumerable<(int Pid, int ParentPid)> EnumerateParentPidsProcFs()
+    {
+        foreach (var directory in Directory.EnumerateDirectories("/proc"))
+        {
+            if (!int.TryParse(Path.GetFileName(directory), out var pid))
+                continue;
+
+            var parentPid = ReadParentPidFromProcStat(pid);
+            if (parentPid >= 0)
+                yield return (pid, parentPid);
+        }
+    }
+
+    private static IEnumerable<(int Pid, int ParentPid)> EnumerateParentPidsMacOS()
+    {
+        var size = Marshal.SizeOf<NativeMethods.proc_bsdinfo>();
+
+        foreach (var pid in ListAllPidsMacOS())
+        {
+            // Fails for processes that exited since the pid list was taken; those are skipped.
+            if (pid > 0 && NativeMethods.proc_pidinfo(pid, NativeMethods.PROC_PIDTBSDINFO, 0, out var info, size) == size)
+                yield return (pid, (int)info.pbi_ppid);
+        }
+    }
+
+    private static int[] ListAllPidsMacOS()
+    {
+        // proc_listallpids returns the number of pids written; a full buffer means the table may
+        // have grown since it was sized, so retry with a larger one.
+        var capacity = Math.Max(NativeMethods.proc_listallpids(null, 0), 0) + 64;
+
+        while (true)
+        {
+            var buffer = new int[capacity];
+            var count = NativeMethods.proc_listallpids(buffer, buffer.Length * sizeof(int));
+            if (count < 0)
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+
+            if (count < buffer.Length)
+            {
+                Array.Resize(ref buffer, count);
+                return buffer;
+            }
+
+            capacity *= 2;
         }
     }
 
     /// <summary>
-    /// Gets child processes on Unix using /proc filesystem
+    /// Reads the parent process ID from /proc/[pid]/stat.
     /// </summary>
-    /// <param name="parentId">Parent process ID</param>
-    /// <returns>List of child process IDs</returns>
-    private static List<int> GetChildProcessIdsUnix(int parentId)
+    /// <param name="processId">Process ID</param>
+    /// <returns>Parent process ID, or -1 if the process no longer exists or the file cannot be parsed</returns>
+    private static int ReadParentPidFromProcStat(int processId)
     {
-        var childIds = new List<int>();
-
         try
         {
-            var allProcesses = Process.GetProcesses();
+            var stat = File.ReadAllText($"/proc/{processId}/stat");
 
-            foreach (var process in allProcesses)
+            // The comm field (2nd field) is enclosed in parentheses and can contain
+            // spaces and parentheses. Find the last ')' to skip it safely.
+            var closeParen = stat.LastIndexOf(')');
+            if (closeParen >= 0 && closeParen + 2 < stat.Length)
             {
-                try
+                // After ')' comes: " state ppid ..."
+                var rest = stat.Substring(closeParen + 2).TrimStart();
+                var parts = rest.Split(' ');
+                // parts[0] = state, parts[1] = ppid
+                if (parts.Length >= 2 && int.TryParse(parts[1], out var parentId))
                 {
-                    if (GetParentProcessId(process.Id) == parentId)
-                    {
-                        childIds.Add(process.Id);
-                        // Recursively get grandchildren
-                        childIds.AddRange(GetChildProcessIdsUnix(process.Id));
-                    }
-                }
-                catch
-                {
-                    // Skip processes we can't access
-                }
-                finally
-                {
-                    process.Dispose();
+                    return parentId;
                 }
             }
         }
         catch
         {
-            // Return empty list on error
-        }
-
-        return childIds;
-    }
-
-    /// <summary>
-    /// Gets the parent process ID (platform-specific implementation)
-    /// </summary>
-    /// <param name="processId">Process ID</param>
-    /// <returns>Parent process ID or -1 if not found</returns>
-    private static int GetParentProcessId(int processId)
-    {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            return GetParentProcessIdWindows(processId);
-        }
-        else
-        {
-            return GetParentProcessIdUnix(processId);
-        }
-    }
-
-    /// <summary>
-    /// Gets parent process ID on Windows using native NT API
-    /// </summary>
-    /// <param name="processId">Process ID</param>
-    /// <returns>Parent process ID</returns>
-    private static int GetParentProcessIdWindows(int processId)
-    {
-        IntPtr processHandle = IntPtr.Zero;
-        try
-        {
-            processHandle = NativeMethods.OpenProcess(
-                NativeMethods.ProcessAccessFlags.QueryInformation,
-                false,
-                processId);
-
-            if (processHandle == IntPtr.Zero)
-            {
-                return -1;
-            }
-
-            var pbi = new NativeMethods.PROCESS_BASIC_INFORMATION();
-            int returnLength;
-            int status = NativeMethods.NtQueryInformationProcess(
-                processHandle,
-                NativeMethods.ProcessBasicInformation,
-                ref pbi,
-                Marshal.SizeOf(pbi),
-                out returnLength);
-
-            if (status == 0) // STATUS_SUCCESS
-            {
-                return pbi.InheritedFromUniqueProcessId.ToInt32();
-            }
-        }
-        catch
-        {
-            // Ignore errors - will return -1
-        }
-        finally
-        {
-            if (processHandle != IntPtr.Zero)
-            {
-                NativeMethods.CloseHandle(processHandle);
-            }
-        }
-
-        return -1;
-    }
-
-    /// <summary>
-    /// Gets parent process ID on Unix systems
-    /// </summary>
-    /// <param name="processId">Process ID</param>
-    /// <returns>Parent process ID</returns>
-    private static int GetParentProcessIdUnix(int processId)
-    {
-        try
-        {
-            var statFile = $"/proc/{processId}/stat";
-            if (File.Exists(statFile))
-            {
-                var stat = File.ReadAllText(statFile);
-                // The comm field (2nd field) is enclosed in parentheses and can contain
-                // spaces and parentheses. Find the last ')' to skip it safely.
-                var closeParen = stat.LastIndexOf(')');
-                if (closeParen >= 0 && closeParen + 2 < stat.Length)
-                {
-                    // After ')' comes: " state ppid ..."
-                    var rest = stat.Substring(closeParen + 2).TrimStart();
-                    var parts = rest.Split(' ');
-                    // parts[0] = state, parts[1] = ppid
-                    if (parts.Length >= 2 && int.TryParse(parts[1], out var parentId))
-                    {
-                        return parentId;
-                    }
-                }
-            }
-        }
-        catch
-        {
-            // Ignore errors
+            // The process exited, or /proc is not readable
         }
 
         return -1;

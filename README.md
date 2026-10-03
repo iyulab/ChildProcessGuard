@@ -300,9 +300,9 @@ using var custom = new ProcessGuardianBuilder()
 - Per-process Job Object assignment tracking with graceful fallback
 
 ### Unix Implementation (Linux/macOS)
-- Tracks descendants by walking parent pids (`/proc` on Linux)
+- Tracks descendants by walking parent pids from one snapshot of the process table (`/proc` on Linux, `libproc` on macOS)
 - Sends `SIGTERM` to the process and its descendants for graceful termination, then `SIGKILL` after the timeout
-- On .NET 8+ the forced kill uses `Process.Kill(entireProcessTree: true)`; the .NET Standard builds walk `/proc`, so on macOS they terminate only the child itself
+- On .NET 8+ the forced kill uses `Process.Kill(entireProcessTree: true)`; the .NET Standard builds use the same descendant walk for it
 - Never signals process groups: children share the parent's group, so a group signal would reach the calling application
 
 ### Termination Sequence

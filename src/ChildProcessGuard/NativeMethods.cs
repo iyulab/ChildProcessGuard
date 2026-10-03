@@ -103,14 +103,30 @@ internal static class NativeMethods
     internal const int SIGTERM = 15;
     internal const int SIGKILL = 9;
 
-    // Windows Process APIs for parent PID and process tree enumeration
-    [DllImport("ntdll.dll")]
-    internal static extern int NtQueryInformationProcess(
-        IntPtr processHandle,
-        int processInformationClass,
-        ref PROCESS_BASIC_INFORMATION processInformation,
-        int processInformationLength,
-        out int returnLength);
+    // macOS process table (libproc), used to enumerate descendants where there is no /proc
+    [DllImport("libproc", SetLastError = true)]
+    internal static extern int proc_listallpids(int[]? buffer, int buffersize);
+
+    [DllImport("libproc", SetLastError = true)]
+    internal static extern int proc_pidinfo(int pid, int flavor, ulong arg, out proc_bsdinfo buffer, int buffersize);
+
+    internal const int PROC_PIDTBSDINFO = 3;
+
+    /// <summary>
+    /// struct proc_bsdinfo from &lt;sys/proc_info.h&gt;. Only the leading fields are read;
+    /// Size covers the whole native struct, which proc_pidinfo requires.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential, Size = 136)]
+    internal struct proc_bsdinfo
+    {
+        public uint pbi_flags;
+        public uint pbi_status;
+        public uint pbi_xstatus;
+        public uint pbi_pid;
+        public uint pbi_ppid;
+    }
+
+    // Windows Process APIs for process tree enumeration and termination
 
     [DllImport("kernel32.dll", SetLastError = true)]
     internal static extern IntPtr OpenProcess(
@@ -137,17 +153,6 @@ internal static class NativeMethods
     internal static extern bool Process32Next(
         IntPtr hSnapshot,
         ref PROCESSENTRY32 lppe);
-
-    [StructLayout(LayoutKind.Sequential)]
-    internal struct PROCESS_BASIC_INFORMATION
-    {
-        public IntPtr Reserved1;
-        public IntPtr PebBaseAddress;
-        public IntPtr Reserved2_0;
-        public IntPtr Reserved2_1;
-        public IntPtr UniqueProcessId;
-        public IntPtr InheritedFromUniqueProcessId;
-    }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
     internal struct PROCESSENTRY32
@@ -197,8 +202,6 @@ internal static class NativeMethods
         NoHeaps = 0x40000000
     }
 
-    // ProcessInformationClass for NtQueryInformationProcess
-    internal const int ProcessBasicInformation = 0;
 
     /// <summary>
     /// Checks if the current platform supports Unix system calls
