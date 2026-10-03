@@ -72,12 +72,8 @@ public class WindowsSpecificTests : IDisposable
         // Act - Dispose guardian
         await _guardian.DisposeAsync();
 
-        // Wait for cleanup
-        await Task.Delay(500, TestContext.Current.CancellationToken);
-
         // Assert - Process should be terminated
-        var stillRunning = IsProcessRunning(processId);
-        stillRunning.Should().BeFalse("Process should be terminated when guardian is disposed");
+        (await WaitUntilAsync(() => !IsProcessRunning(processId))).Should().BeTrue("Process should be terminated when guardian is disposed");
     }
 
     [Fact(SkipUnless = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires Windows")]
@@ -110,4 +106,25 @@ public class WindowsSpecificTests : IDisposable
         processInfo.Should().NotBeNull();
     }
 
+    [Fact(SkipUnless = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires Windows")]
+    public void KillProcessTree_OnWindows_KillsRootAndDescendants()
+    {
+        // cmd.exe is the root; the ping it runs is its child. Not started through a guardian, so no
+        // Job Object takes part: this exercises the tree walk on its own.
+        using var root = Process.Start(new ProcessStartInfo("cmd.exe", "/c ping localhost -n 30")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        })!;
+
+        var descendants = new List<int>();
+        WaitUntil(() => (descendants = CompatibilityExtensions.GetDescendantProcessIdsWindows(root.Id)).Count > 0)
+            .Should().BeTrue("ping should have been found as a child of cmd.exe");
+        using var child = Process.GetProcessById(descendants[0]);
+
+        root.KillProcessTree(entireProcessTree: true);
+
+        root.WaitForExit(15000).Should().BeTrue();
+        child.WaitForExit(15000).Should().BeTrue("the child should have been killed with the tree");
+    }
 }

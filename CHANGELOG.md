@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 - macOS: the graceful stage (`SIGTERM`) reached only the child itself, and so did the forced stage in the .NET Standard builds, because descendants were found by reading `/proc`, which macOS does not have. Descendants are now enumerated through `libproc` on macOS.
 - Unix: descendant enumeration re-read the whole process table once per descendant; it now walks a single snapshot.
+- Windows: forcing a process tree to terminate took seconds per process on a machine with many processes in the .NET 8 and .NET 10 builds, because the runtime's `Process.Kill(entireProcessTree: true)` opens every process on the machine to find descendants. The tree is now taken from one ToolHelp32 snapshot on every target.
+- Windows (.NET Standard builds): a recorded parent process ID is kept after the parent exits and can be reused, so an unrelated process could be treated as a descendant and killed. A child is now only accepted if it was created after its parent.
 
 ## [1.3.0] - 2026-10-03
 

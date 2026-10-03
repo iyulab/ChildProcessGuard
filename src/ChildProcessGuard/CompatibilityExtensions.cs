@@ -86,35 +86,34 @@ internal static class CompatibilityExtensions
             return;
         }
 
-#if NET5_0_OR_GREATER
-        // Prefer the runtime's own implementation; the portable fallback below enumerates
-        // descendants itself (ToolHelp32 on Windows, /proc on Linux, libproc on macOS).
-        try
-        {
-            process.Kill(entireProcessTree: true);
-            return;
-        }
-        catch (InvalidOperationException)
-        {
-            // Process already exited
-            return;
-        }
-        catch
-        {
-            // Fall through to the portable implementation
-        }
-#endif
-
         try
         {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
+                // Not delegated to the runtime on Windows: Process.Kill(entireProcessTree) opens every
+                // process on the machine to find descendants, which takes seconds on a busy system.
                 KillProcessTreeWindows(process.Id);
+                return;
             }
-            else
+
+#if NET5_0_OR_GREATER
+            try
             {
-                SignalProcessTreeUnix(process.Id, NativeMethods.SIGKILL);
+                process.Kill(entireProcessTree: true);
+                return;
             }
+            catch (InvalidOperationException)
+            {
+                // Process already exited
+                return;
+            }
+            catch
+            {
+                // Fall through to the portable implementation
+            }
+#endif
+
+            SignalProcessTreeUnix(process.Id, NativeMethods.SIGKILL);
         }
         catch
         {
@@ -150,105 +149,98 @@ internal static class CompatibilityExtensions
     }
 
     /// <summary>
-    /// Kills process tree on Windows using native ToolHelp32 API
+    /// Kills a process tree on Windows. Descendants are taken from one snapshot before anything is
+    /// killed, and the root is killed first so that it cannot start further children.
     /// </summary>
-    /// <param name="processId">Process ID to kill</param>
+    /// <param name="processId">Process ID of the tree root</param>
     private static void KillProcessTreeWindows(int processId)
     {
-        try
+        var descendants = GetDescendantProcessIdsWindows(processId);
+
+        KillProcessNative(processId);
+
+        foreach (var descendantId in descendants)
         {
-            // Get all child processes recursively
-            var childProcessIds = GetChildProcessIdsNative(processId);
-            
-            // Kill children first (depth-first)
-            foreach (var childId in childProcessIds)
-            {
-                KillProcessNative(childId);
-            }
-            
-            // Kill the parent process
-            KillProcessNative(processId);
-        }
-        catch
-        {
-            // Fallback to direct kill
-            try
-            {
-                var process = Process.GetProcessById(processId);
-                process.Kill();
-            }
-            catch
-            {
-                // Process might have already exited
-            }
+            KillProcessNative(descendantId);
         }
     }
 
     /// <summary>
-    /// Gets child process IDs using native ToolHelp32 API
+    /// Gets the IDs of every descendant of a process on Windows from one ToolHelp32 snapshot.
+    /// Windows keeps a process's recorded parent pid after the parent exits, so the pid may since
+    /// have been reused by an unrelated process; a child is only accepted if it was created after
+    /// its parent, which is the check the runtime applies as well.
     /// </summary>
-    /// <param name="parentId">Parent process ID</param>
-    /// <returns>List of child process IDs</returns>
-    private static List<int> GetChildProcessIdsNative(int parentId)
+    /// <param name="rootProcessId">Process ID of the tree root</param>
+    /// <returns>Descendant process IDs, parents before their children</returns>
+    internal static List<int> GetDescendantProcessIdsWindows(int rootProcessId)
     {
-        var parentChildMap = new Dictionary<int, List<int>>();
-        IntPtr snapshot = IntPtr.Zero;
+        var creationTimes = new Dictionary<int, long>();
+        long CreationTime(int pid)
+        {
+            if (!creationTimes.TryGetValue(pid, out var time))
+            {
+                time = GetCreationTimeWindows(pid);
+                creationTimes[pid] = time;
+            }
+
+            return time;
+        }
+
+        return WalkDescendants(rootProcessId, GetChildrenByParentWindows(), (parentId, childId) =>
+        {
+            var parentCreated = CreationTime(parentId);
+            return parentCreated != 0 && CreationTime(childId) >= parentCreated;
+        });
+    }
+
+    private static Dictionary<int, List<int>> GetChildrenByParentWindows()
+    {
+        var childrenByParent = new Dictionary<int, List<int>>();
+        var snapshot = NativeMethods.CreateToolhelp32Snapshot(NativeMethods.SnapshotFlags.Process, 0);
+        if (snapshot == IntPtr.Zero || snapshot == new IntPtr(-1))
+            return childrenByParent;
 
         try
         {
-            snapshot = NativeMethods.CreateToolhelp32Snapshot(
-                NativeMethods.SnapshotFlags.Process, 0);
-
-            if (snapshot == IntPtr.Zero || snapshot == new IntPtr(-1))
-                return new List<int>();
-
             var entry = new NativeMethods.PROCESSENTRY32
             {
                 dwSize = (uint)Marshal.SizeOf(typeof(NativeMethods.PROCESSENTRY32))
             };
 
             if (!NativeMethods.Process32First(snapshot, ref entry))
-                return new List<int>();
+                return childrenByParent;
 
-            // Build parent-child map from single snapshot
             do
             {
-                var pid = (int)entry.th32ProcessID;
-                var ppid = (int)entry.th32ParentProcessID;
-
-                if (!parentChildMap.ContainsKey(ppid))
-                    parentChildMap[ppid] = new List<int>();
-
-                parentChildMap[ppid].Add(pid);
+                AddChild(childrenByParent, (int)entry.th32ParentProcessID, (int)entry.th32ProcessID);
             } while (NativeMethods.Process32Next(snapshot, ref entry));
-        }
-        catch
-        {
-            return new List<int>();
         }
         finally
         {
-            if (snapshot != IntPtr.Zero && snapshot != new IntPtr(-1))
-            {
-                NativeMethods.CloseHandle(snapshot);
-            }
+            NativeMethods.CloseHandle(snapshot);
         }
 
-        // Traverse tree from parentId
-        var result = new List<int>();
-        CollectDescendants(parentId, parentChildMap, result);
-        return result;
+        return childrenByParent;
     }
 
-    private static void CollectDescendants(int parentId, Dictionary<int, List<int>> map, List<int> result)
+    /// <summary>
+    /// Gets the creation time of a process as a FILETIME value.
+    /// </summary>
+    /// <returns>The creation time, or 0 if the process cannot be opened (exited or access denied)</returns>
+    private static long GetCreationTimeWindows(int processId)
     {
-        if (!map.TryGetValue(parentId, out var children))
-            return;
+        var handle = NativeMethods.OpenProcess(NativeMethods.ProcessAccessFlags.QueryLimitedInformation, false, processId);
+        if (handle == IntPtr.Zero)
+            return 0;
 
-        foreach (var childId in children)
+        try
         {
-            result.Add(childId);
-            CollectDescendants(childId, map, result);
+            return NativeMethods.GetProcessTimes(handle, out var creationTime, out _, out _, out _) ? creationTime : 0;
+        }
+        finally
+        {
+            NativeMethods.CloseHandle(handle);
         }
     }
 
@@ -312,10 +304,8 @@ internal static class CompatibilityExtensions
     /// </summary>
     /// <param name="rootProcessId">Process ID of the tree root</param>
     /// <returns>Descendant process IDs, parents before their children; empty if the table cannot be read</returns>
-    private static List<int> GetDescendantProcessIdsUnix(int rootProcessId)
+    internal static List<int> GetDescendantProcessIdsUnix(int rootProcessId)
     {
-        var descendants = new List<int>();
-
         Dictionary<int, List<int>> childrenByParent;
         try
         {
@@ -323,29 +313,58 @@ internal static class CompatibilityExtensions
         }
         catch
         {
-            return descendants;
+            return new List<int>();
         }
 
+        // Unix re-parents orphans to init (or a subreaper), so a recorded parent pid always names
+        // a live parent and needs no further check.
+        return WalkDescendants(rootProcessId, childrenByParent, (_, _) => true);
+    }
+
+    /// <summary>
+    /// Walks a parent-to-children map breadth-first from a root, following only the links that
+    /// <paramref name="isChildOf"/> accepts. Each process is visited once, so a cycle in the map
+    /// (possible with stale parent pids) cannot loop.
+    /// </summary>
+    private static List<int> WalkDescendants(int rootProcessId, Dictionary<int, List<int>> childrenByParent, Func<int, int, bool> isChildOf)
+    {
+        var descendants = new List<int>();
         var visited = new HashSet<int> { rootProcessId };
         var pending = new Queue<int>();
         pending.Enqueue(rootProcessId);
 
         while (pending.Count > 0)
         {
-            if (!childrenByParent.TryGetValue(pending.Dequeue(), out var children))
+            var parentId = pending.Dequeue();
+            if (!childrenByParent.TryGetValue(parentId, out var children))
                 continue;
 
-            foreach (var child in children)
+            foreach (var childId in children)
             {
-                if (visited.Add(child))
+                if (!visited.Contains(childId) && isChildOf(parentId, childId))
                 {
-                    descendants.Add(child);
-                    pending.Enqueue(child);
+                    visited.Add(childId);
+                    descendants.Add(childId);
+                    pending.Enqueue(childId);
                 }
             }
         }
 
         return descendants;
+    }
+
+    private static void AddChild(Dictionary<int, List<int>> childrenByParent, int parentId, int childId)
+    {
+        if (parentId == childId)
+            return; // the idle/system entries on Windows list themselves as their own parent
+
+        if (!childrenByParent.TryGetValue(parentId, out var children))
+        {
+            children = new List<int>();
+            childrenByParent[parentId] = children;
+        }
+
+        children.Add(childId);
     }
 
     private static Dictionary<int, List<int>> GetChildrenByParentUnix()
@@ -357,13 +376,7 @@ internal static class CompatibilityExtensions
         var childrenByParent = new Dictionary<int, List<int>>();
         foreach (var (pid, parentPid) in parentPids)
         {
-            if (!childrenByParent.TryGetValue(parentPid, out var children))
-            {
-                children = new List<int>();
-                childrenByParent[parentPid] = children;
-            }
-
-            children.Add(pid);
+            AddChild(childrenByParent, parentPid, pid);
         }
 
         return childrenByParent;

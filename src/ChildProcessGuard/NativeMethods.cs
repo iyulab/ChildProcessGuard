@@ -135,6 +135,14 @@ internal static class NativeMethods
         int processId);
 
     [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern bool GetProcessTimes(
+        IntPtr hProcess,
+        out long lpCreationTime,
+        out long lpExitTime,
+        out long lpKernelTime,
+        out long lpUserTime);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
     internal static extern bool TerminateProcess(
         IntPtr hProcess,
         uint uExitCode);
