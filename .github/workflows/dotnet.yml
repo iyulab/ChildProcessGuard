@@ -53,43 +53,8 @@ jobs:
       # --output Detailed lists every test as it finishes and --long-running names any test still
       # running after 60 s; the step timeout fails a hung run with its log kept (a cancelled job
       # loses the log of the step that was running).
-      if: runner.os != 'macOS'
       timeout-minutes: 15
       run: dotnet test --project ${{ env.TEST_PATH }} --configuration Release --no-build --output Detailed --long-running 60
-
-    # TEMPORARY macOS diagnosis: running the whole suite in one test process leaves the macOS
-    # runner unresponsive (even step timeouts stop working), while each class passes on its own.
-    # The suite runs as 'nobody' so that whatever it does to other processes cannot reach the
-    # runner agent, and the verbose reporter shows the last test that started.
-    - name: "macOS diag: process limits"
-      if: runner.os == 'macOS'
-      run: |
-        sysctl kern.maxproc kern.maxprocperuid
-        ulimit -u
-        ps -A | wc -l
-    - name: "macOS diag: runner processes before"
-      if: runner.os == 'macOS'
-      run: ps -U "$(id -u)" -o pid,ppid,pgid,stat,comm
-    - name: "macOS diag: as runner, parallel, root-visibility interlock, run 1"
-      if: runner.os == 'macOS'
-      timeout-minutes: 4
-      continue-on-error: true
-      run: CPG_TRACE_SIGNALS=1 dotnet tests/ChildProcessGuard.Tests/bin/Release/net9.0/ChildProcessGuard.Tests.dll -reporter verbose -noColor 2>&1 | grep -E "BLOCKED|not visible|ps failed|SUMMARY|Total:|FAIL" | sed 's/ stack:.*//'
-    - name: "macOS diag: as runner, parallel, root-visibility interlock, run 2"
-      if: runner.os == 'macOS'
-      timeout-minutes: 4
-      continue-on-error: true
-      run: CPG_TRACE_SIGNALS=1 dotnet tests/ChildProcessGuard.Tests/bin/Release/net9.0/ChildProcessGuard.Tests.dll -reporter verbose -noColor 2>&1 | grep -E "BLOCKED|not visible|ps failed|SUMMARY|Total:|FAIL" | sed 's/ stack:.*//'
-    - name: "macOS diag: as runner, parallel, root-visibility interlock, run 3"
-      if: runner.os == 'macOS'
-      timeout-minutes: 4
-      continue-on-error: true
-      run: CPG_TRACE_SIGNALS=1 dotnet tests/ChildProcessGuard.Tests/bin/Release/net9.0/ChildProcessGuard.Tests.dll -reporter verbose -noColor 2>&1 | grep -E "BLOCKED|not visible|ps failed|SUMMARY|Total:|FAIL" | sed 's/ stack:.*//'
-    - name: "macOS diag: after"
-      if: always() && runner.os == 'macOS'
-      run: |
-        ps -A | wc -l
-        ps -A -o pid,ppid,user,comm | grep -v ' root ' | tail -40
 
   publish:
     needs: build-test

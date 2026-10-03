@@ -203,6 +203,17 @@ public class UnixSpecificTests : IDisposable
         }
     }
 
+    [Fact(SkipWhen = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires a Unix platform")]
+    [Trait("Category", "Fast")]
+    public void SignalProcessTreeUnix_WhenRootIsNotARunningChild_SendsNothing()
+    {
+        // Signal 0 only checks that a signal could be delivered, so nothing is disturbed either way.
+        using var self = Process.GetCurrentProcess();
+
+        CompatibilityExtensions.SignalProcessTreeUnix(self.Id, 0).Should().BeFalse("the caller is not its own child");
+        CompatibilityExtensions.SignalProcessTreeUnix(1, 0).Should().BeFalse("init/launchd is not a child of the caller");
+    }
+
     private Process StartShell(string script, bool redirectStandardOutput = false)
     {
         var startInfo = new ProcessStartInfo("/bin/sh")

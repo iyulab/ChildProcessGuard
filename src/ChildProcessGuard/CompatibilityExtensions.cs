@@ -99,8 +99,6 @@ internal static class CompatibilityExtensions
 #if NET5_0_OR_GREATER
             try
             {
-                if (Environment.GetEnvironmentVariable("CPG_TRACE_SIGNALS") == "1")
-                    Console.Error.WriteLine($"[cpg-signal] runtime Kill(entireProcessTree) self={Process.GetCurrentProcess().Id} root={process.Id} exited={process.HasExited}");
                 process.Kill(entireProcessTree: true);
                 return;
             }
@@ -280,89 +278,48 @@ internal static class CompatibilityExtensions
 
     /// <summary>
     /// Sends a signal to a process and to every descendant known at the time of the call.
-    /// Descendants are enumerated before the root is signalled so that they are still reachable
-    /// through their parent pid; a descendant re-parented afterwards is not affected.
+    /// The root is only signalled while the process table shows it running as a child of the current
+    /// process: a child that has exited but not been reaped yet, or whose pid has already been reaped,
+    /// is left alone, so a signal can never reach a process that merely reuses the pid. Descendants
+    /// are enumerated before the root is signalled so that they are still reachable through their
+    /// parent pid; a descendant re-parented afterwards is not affected.
     /// </summary>
     /// <param name="rootProcessId">Process ID of the tree root</param>
     /// <param name="signal">Signal number to send</param>
     /// <returns>True if the signal was delivered to the root process</returns>
     internal static bool SignalProcessTreeUnix(int rootProcessId, int signal)
     {
-        var descendants = GetDescendantProcessIdsUnix(rootProcessId);
-
-        // TEMPORARY diagnosis (CPG_TRACE_SIGNALS): log every signal and its result.
-        var trace = Environment.GetEnvironmentVariable("CPG_TRACE_SIGNALS") == "1";
-        int Send(int pid)
+        Dictionary<int, List<int>> childrenByParent;
+        try
         {
-            if (trace && pid == rootProcessId && !IsChildOfCurrentProcessForTrace(pid))
-            {
-                string blockedName;
-                try { using var p = Process.GetProcessById(pid); blockedName = p.ProcessName; } catch { blockedName = "?"; }
-                Console.Error.WriteLine($"[cpg-signal] BLOCKED foreign target self={Process.GetCurrentProcess().Id} root={rootProcessId} pid={pid} {blockedName} signal={signal} descendants=[{string.Join(",", descendants)}] stack: " + new StackTrace(1, false).ToString().Replace(Environment.NewLine, " | "));
-                return -1;
-            }
-
-            var rc = NativeMethods.SendSignal(pid, signal);
-            if (trace)
-            {
-                var errno = rc == 0 ? 0 : Marshal.GetLastWin32Error();
-                string name;
-                try { using var p = Process.GetProcessById(pid); name = p.ProcessName; } catch { name = "?"; }
-                Console.Error.WriteLine($"[cpg-signal] self={Process.GetCurrentProcess().Id} root={rootProcessId} kill({pid} {name}, {signal}) rc={rc} errno={errno} descendants=[{string.Join(",", descendants)}]");
-                if (errno == 1)
-                    Console.Error.WriteLine("[cpg-signal] EPERM stack: " + new StackTrace(1, false).ToString().Replace(Environment.NewLine, " | "));
-            }
-            return rc;
+            childrenByParent = GetChildrenByParentUnix();
+        }
+        catch
+        {
+            return false;
         }
 
-        var delivered = Send(rootProcessId) == 0;
+        if (!childrenByParent.TryGetValue(CurrentProcessId, out var children) || !children.Contains(rootProcessId))
+            return false;
+
+        var descendants = WalkDescendants(rootProcessId, childrenByParent, (_, _) => true);
+
+        var delivered = NativeMethods.SendSignal(rootProcessId, signal) == 0;
 
         foreach (var pid in descendants)
         {
-            Send(pid);
+            NativeMethods.SendSignal(pid, signal);
         }
 
         return delivered;
     }
 
-    // TEMPORARY diagnosis: true if pid is a direct child of the current process in a fresh snapshot.
-    private static bool IsChildOfCurrentProcessForTrace(int pid)
+    private static readonly int CurrentProcessId = GetCurrentProcessId();
+
+    private static int GetCurrentProcessId()
     {
-        var self = Process.GetCurrentProcess().Id;
-        var visible = GetChildrenByParentUnix().TryGetValue(self, out var children) && children.Contains(pid);
-        if (!visible)
-        {
-            try
-            {
-                using var ps = Process.Start(new ProcessStartInfo("/bin/ps", $"-o pid=,ppid=,stat=,comm= -p {pid}") { UseShellExecute = false, RedirectStandardOutput = true })!;
-                Console.Error.WriteLine($"[cpg-signal] not visible as child: ps says '{ps.StandardOutput.ReadToEnd().Trim()}'");
-                ps.WaitForExit(2000);
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"[cpg-signal] ps failed: {ex.Message}");
-            }
-        }
-
-        return visible;
-    }
-
-    // TEMPORARY diagnosis: true if pid descends from the current process in a fresh snapshot.
-    private static bool IsDescendantOfCurrentProcessForTrace(int pid)
-    {
-        var self = Process.GetCurrentProcess().Id;
-        var parentOf = new Dictionary<int, int>();
-        foreach (var pair in GetChildrenByParentUnix())
-            foreach (var child in pair.Value)
-                parentOf[child] = pair.Key;
-
-        for (var current = pid; current > 1 && parentOf.TryGetValue(current, out var parent); current = parent)
-        {
-            if (parent == self)
-                return true;
-        }
-
-        return false;
+        using var current = Process.GetCurrentProcess();
+        return current.Id;
     }
 
     /// <summary>
@@ -456,7 +413,7 @@ internal static class CompatibilityExtensions
             if (!int.TryParse(Path.GetFileName(directory), out var pid))
                 continue;
 
-            var parentPid = ReadParentPidFromProcStat(pid);
+            var parentPid = ReadRunningParentPidFromProcStat(pid);
             if (parentPid >= 0)
                 yield return (pid, parentPid);
         }
@@ -498,11 +455,12 @@ internal static class CompatibilityExtensions
     }
 
     /// <summary>
-    /// Reads the parent process ID from /proc/[pid]/stat.
+    /// Reads the parent process ID of a running process from /proc/[pid]/stat.
     /// </summary>
     /// <param name="processId">Process ID</param>
-    /// <returns>Parent process ID, or -1 if the process no longer exists or the file cannot be parsed</returns>
-    private static int ReadParentPidFromProcStat(int processId)
+    /// <returns>Parent process ID, or -1 if the process has exited (including zombies), no longer
+    /// exists, or the file cannot be parsed</returns>
+    private static int ReadRunningParentPidFromProcStat(int processId)
     {
         try
         {
@@ -516,8 +474,8 @@ internal static class CompatibilityExtensions
                 // After ')' comes: " state ppid ..."
                 var rest = stat.Substring(closeParen + 2).TrimStart();
                 var parts = rest.Split(' ');
-                // parts[0] = state, parts[1] = ppid
-                if (parts.Length >= 2 && int.TryParse(parts[1], out var parentId))
+                // parts[0] = state, parts[1] = ppid; Z (zombie) and X (dead) have already exited
+                if (parts.Length >= 2 && parts[0] != "Z" && parts[0] != "X" && int.TryParse(parts[1], out var parentId))
                 {
                     return parentId;
                 }
