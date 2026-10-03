@@ -50,7 +50,9 @@ jobs:
     # platform-specific tests, so both termination paths are exercised on their own OS.
     # global.json selects Microsoft.Testing.Platform as the dotnet test runner (xunit.v3).
     - name: Test
-      run: dotnet test --project ${{ env.TEST_PATH }} --configuration Release --no-build
+      # --long-running names any test still running after 60 s, and --timeout ends a hung run with
+      # its log intact (a cancelled job loses the log of the step that was running).
+      run: dotnet test --project ${{ env.TEST_PATH }} --configuration Release --no-build --long-running 60 --timeout 15m
 
   publish:
     needs: build-test
