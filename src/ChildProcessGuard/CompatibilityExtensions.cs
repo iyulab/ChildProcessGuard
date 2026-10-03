@@ -294,7 +294,7 @@ internal static class CompatibilityExtensions
         var trace = Environment.GetEnvironmentVariable("CPG_TRACE_SIGNALS") == "1";
         int Send(int pid)
         {
-            if (trace && !IsDescendantOfCurrentProcessForTrace(pid))
+            if (trace && pid == rootProcessId && !IsChildOfCurrentProcessForTrace(pid))
             {
                 string blockedName;
                 try { using var p = Process.GetProcessById(pid); blockedName = p.ProcessName; } catch { blockedName = "?"; }
@@ -323,6 +323,28 @@ internal static class CompatibilityExtensions
         }
 
         return delivered;
+    }
+
+    // TEMPORARY diagnosis: true if pid is a direct child of the current process in a fresh snapshot.
+    private static bool IsChildOfCurrentProcessForTrace(int pid)
+    {
+        var self = Process.GetCurrentProcess().Id;
+        var visible = GetChildrenByParentUnix().TryGetValue(self, out var children) && children.Contains(pid);
+        if (!visible)
+        {
+            try
+            {
+                using var ps = Process.Start(new ProcessStartInfo("/bin/ps", $"-o pid=,ppid=,stat=,comm= -p {pid}") { UseShellExecute = false, RedirectStandardOutput = true })!;
+                Console.Error.WriteLine($"[cpg-signal] not visible as child: ps says '{ps.StandardOutput.ReadToEnd().Trim()}'");
+                ps.WaitForExit(2000);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[cpg-signal] ps failed: {ex.Message}");
+            }
+        }
+
+        return visible;
     }
 
     // TEMPORARY diagnosis: true if pid descends from the current process in a fresh snapshot.

@@ -70,11 +70,21 @@ jobs:
     - name: "macOS diag: runner processes before"
       if: runner.os == 'macOS'
       run: ps -U "$(id -u)" -o pid,ppid,pgid,stat,comm
-    - name: "macOS diag: net9.0 whole suite as runner, parallel, signals traced and interlocked"
+    - name: "macOS diag: as runner, parallel, root-visibility interlock, run 1"
       if: runner.os == 'macOS'
-      timeout-minutes: 5
+      timeout-minutes: 4
       continue-on-error: true
-      run: CPG_TRACE_SIGNALS=1 dotnet tests/ChildProcessGuard.Tests/bin/Release/net9.0/ChildProcessGuard.Tests.dll -reporter verbose -noColor 2>&1 | grep -E "cpg-signal|SUMMARY|Total:|FAIL" 
+      run: CPG_TRACE_SIGNALS=1 dotnet tests/ChildProcessGuard.Tests/bin/Release/net9.0/ChildProcessGuard.Tests.dll -reporter verbose -noColor 2>&1 | grep -E "BLOCKED|not visible|ps failed|SUMMARY|Total:|FAIL" | sed 's/ stack:.*//'
+    - name: "macOS diag: as runner, parallel, root-visibility interlock, run 2"
+      if: runner.os == 'macOS'
+      timeout-minutes: 4
+      continue-on-error: true
+      run: CPG_TRACE_SIGNALS=1 dotnet tests/ChildProcessGuard.Tests/bin/Release/net9.0/ChildProcessGuard.Tests.dll -reporter verbose -noColor 2>&1 | grep -E "BLOCKED|not visible|ps failed|SUMMARY|Total:|FAIL" | sed 's/ stack:.*//'
+    - name: "macOS diag: as runner, parallel, root-visibility interlock, run 3"
+      if: runner.os == 'macOS'
+      timeout-minutes: 4
+      continue-on-error: true
+      run: CPG_TRACE_SIGNALS=1 dotnet tests/ChildProcessGuard.Tests/bin/Release/net9.0/ChildProcessGuard.Tests.dll -reporter verbose -noColor 2>&1 | grep -E "BLOCKED|not visible|ps failed|SUMMARY|Total:|FAIL" | sed 's/ stack:.*//'
     - name: "macOS diag: after"
       if: always() && runner.os == 'macOS'
       run: |
