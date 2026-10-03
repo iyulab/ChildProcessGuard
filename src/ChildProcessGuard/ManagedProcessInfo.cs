@@ -13,7 +13,7 @@ public class ManagedProcessInfo
     public Process Process { get; private set; }
 
     /// <summary>
-    /// When the process was started
+    /// When the process was started, in UTC
     /// </summary>
     public DateTime StartTime { get; private set; }
 
@@ -141,7 +141,7 @@ public class ManagedProcessInfo
     /// <summary>
     /// Attempts to get the process exit time
     /// </summary>
-    /// <returns>The exit time if available, null otherwise</returns>
+    /// <returns>The exit time in local time (as reported by <see cref="Process.ExitTime"/>) if available, null otherwise</returns>
     public DateTime? GetExitTime()
     {
         try
@@ -160,7 +160,9 @@ public class ManagedProcessInfo
     /// <returns>The runtime duration</returns>
     public TimeSpan GetRuntime()
     {
-        var endTime = GetExitTime() ?? DateTime.UtcNow;
+        // StartTime is UTC while Process.ExitTime is local; DateTime subtraction ignores Kind,
+        // so the exit time must be converted or the result is off by the UTC offset.
+        var endTime = GetExitTime()?.ToUniversalTime() ?? DateTime.UtcNow;
         return endTime - StartTime;
     }
 

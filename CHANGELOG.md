@@ -3,10 +3,12 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.2.1] - 2026-10-03
 
 ### Fixed
 - The package now includes the `LICENSE` file at its root alongside the `MIT` license expression, so the copyright and permission notice that the MIT license requires travels with every copy of the package.
+- `KillAllProcessesAsync`, `KillAllProcesses` and `Dispose` now terminate managed processes concurrently. The close request and the process-tree kill are blocking calls that ran before the first asynchronous wait, so processes were terminated one after another and disposal time grew with the number of children (several seconds per child on a busy machine).
+- `ManagedProcessInfo.GetRuntime()` (and the runtime shown by `ToString()`) was off by the machine's UTC offset for exited processes, because it subtracted the UTC start time from the local exit time.
 
 ## [1.2.0] - 2026-09-14
 

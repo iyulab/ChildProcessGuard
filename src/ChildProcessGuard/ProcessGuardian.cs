@@ -226,8 +226,10 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
 
         LogMessage($"Terminating {processesToKill.Count} managed processes", LogLevel.Information);
 
-        // First, try graceful termination
-        var tasks = processesToKill.Select(async processInfo =>
+        // Terminate all processes concurrently. Each termination starts with blocking native calls
+        // (the close request and the process-tree kill), so running them inline would serialize the
+        // whole batch and make disposal time grow with the number of children.
+        var tasks = processesToKill.Select(processInfo => Task.Run(async () =>
         {
             try
             {
@@ -242,7 +244,7 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
                 Interlocked.Increment(ref failureCount);
                 OnProcessError("KillProcess", ex, processInfo.Id);
             }
-        });
+        }));
 
         await Task.WhenAll(tasks);
 

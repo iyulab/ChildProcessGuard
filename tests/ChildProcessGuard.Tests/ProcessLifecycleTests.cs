@@ -144,6 +144,19 @@ public class ProcessLifecycleTests : IDisposable
 
     [Fact]
     [Trait("Category", "Process")]
+    public void GetRuntime_AfterExit_IsNotOffsetByTheUtcOffset()
+    {
+        using var process = Process.Start(ShortLivedChild())!;
+        var info = new ManagedProcessInfo(process, "child", string.Empty);
+        process.WaitForExit();
+
+        // Exit time is reported in local time and the start time in UTC; on any machine whose
+        // clock is not at UTC, mixing the two shifts the runtime by hours.
+        info.GetRuntime().Duration().Should().BeLessThan(TimeSpan.FromMinutes(1));
+    }
+
+    [Fact]
+    [Trait("Category", "Process")]
     public async Task StartProcess_ExitedChild_IsRemovedFromManagedList()
     {
         _guardian = new ProcessGuardian(NoTimerOptions());
