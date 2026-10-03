@@ -8,6 +8,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Added
 - `ProcessGuardianOptions.CloseRequest` and `ProcessGuardianBuilder.WithCloseRequest` let the caller supply the close request of the graceful termination stage — for example closing a console child's standard input or sending it a quit command. When the callback returns `true`, the guardian waits up to `ProcessKillTimeout` and then forces the tree as before; when it returns `false` or throws, the built-in request (`SIGTERM` on Unix, `CloseMainWindow` on Windows) is used. It applies to `TerminateProcessAsync`, `TerminateProcessesWhere`, `KillAllProcesses` and `Dispose`.
 
+### Removed
+- The `net8.0` target. .NET 8 reaches end of support on 2026-11-10, and the build had no code of its own: projects targeting .NET 8 or .NET 9 now use the `netstandard2.1` build, which exposes the same API.
+
 ## [1.3.1] - 2026-10-04
 
 ### Fixed
