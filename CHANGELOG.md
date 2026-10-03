@@ -3,6 +3,11 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- The package now includes the `LICENSE` file at its root alongside the `MIT` license expression, so the copyright and permission notice that the MIT license requires travels with every copy of the package.
+
 ## [1.2.0] - 2026-09-14
 
 ### Fixed
