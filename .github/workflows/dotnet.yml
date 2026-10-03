@@ -57,28 +57,30 @@ jobs:
       timeout-minutes: 15
       run: dotnet test --project ${{ env.TEST_PATH }} --configuration Release --no-build --output Detailed --long-running 60
 
-    # TEMPORARY macOS diagnosis: the test app passes when run directly; find which way of running
-    # it hangs the macOS runner. Ordered from least to most likely to hang.
-    - name: "macOS diag: net9.0 test app, whole suite"
+    # TEMPORARY macOS diagnosis: running the whole suite in one test process leaves the macOS
+    # runner unresponsive (even step timeouts stop working), while each class passes on its own.
+    # The suite runs as 'nobody' so that whatever it does to other processes cannot reach the
+    # runner agent, and the verbose reporter shows the last test that started.
+    - name: "macOS diag: process limits"
       if: runner.os == 'macOS'
-      timeout-minutes: 4
-      continue-on-error: true
-      run: dotnet tests/ChildProcessGuard.Tests/bin/Release/net9.0/ChildProcessGuard.Tests.dll -reporter verbose -noColor -longRunning 30
-    - name: "macOS diag: net10.0 test app, whole suite"
-      if: runner.os == 'macOS'
-      timeout-minutes: 4
-      continue-on-error: true
-      run: dotnet tests/ChildProcessGuard.Tests/bin/Release/net10.0/ChildProcessGuard.Tests.dll -reporter verbose -noColor -longRunning 30
-    - name: "macOS diag: dotnet test, net10.0 only"
+      run: |
+        sysctl kern.maxproc kern.maxprocperuid
+        ulimit -u
+        ps -A | wc -l
+    - name: "macOS diag: net9.0 whole suite as nobody"
       if: runner.os == 'macOS'
       timeout-minutes: 6
       continue-on-error: true
-      run: dotnet test --project ${{ env.TEST_PATH }} --configuration Release --no-build --framework net10.0 --output Detailed
-    - name: "macOS diag: dotnet test, all frameworks"
-      if: runner.os == 'macOS'
-      timeout-minutes: 8
-      continue-on-error: true
-      run: dotnet test --project ${{ env.TEST_PATH }} --configuration Release --no-build --output Detailed
+      run: |
+        sudo chmod o+x "$HOME" "$(dirname "$GITHUB_WORKSPACE")" "$(dirname "$DOTNET_ROOT")" || true
+        sudo chmod -R o+rX "$GITHUB_WORKSPACE" "$DOTNET_ROOT" || true
+        echo "DOTNET_ROOT=$DOTNET_ROOT"
+        sudo -u nobody env HOME=/tmp TMPDIR=/tmp DOTNET_CLI_HOME=/tmp DOTNET_ROOT="$DOTNET_ROOT" PATH="$PATH"           "$DOTNET_ROOT/dotnet" tests/ChildProcessGuard.Tests/bin/Release/net9.0/ChildProcessGuard.Tests.dll -reporter verbose -noColor -longRunning 30
+    - name: "macOS diag: after"
+      if: always() && runner.os == 'macOS'
+      run: |
+        ps -A | wc -l
+        ps -A -o pid,ppid,user,comm | grep -v ' root ' | tail -40
 
   publish:
     needs: build-test
