@@ -2,7 +2,7 @@
 // ProcessStartInfo.ArgumentList, so the whole class is excluded there.
 #if !NETFRAMEWORK
 using System.Diagnostics;
-using FluentAssertions;
+using AwesomeAssertions;
 using Xunit;
 using static ChildProcessGuard.Tests.TestProcesses;
 

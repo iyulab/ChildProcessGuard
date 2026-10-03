@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using FluentAssertions;
+using AwesomeAssertions;
 using Xunit;
 using static ChildProcessGuard.Tests.TestProcesses;
 
