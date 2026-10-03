@@ -36,6 +36,42 @@ internal static class TestProcesses
         UseShellExecute = false,
     };
 
+    /// <summary>
+    /// Polls a condition until it holds or the timeout passes. The default timeout is generous because
+    /// a loaded machine can take seconds to start or reap a process; a passing check returns at once.
+    /// </summary>
+    /// <returns>Whether the condition held</returns>
+    public static bool WaitUntil(Func<bool> condition, TimeSpan? timeout = null)
+    {
+        var deadline = DateTime.UtcNow + (timeout ?? DefaultWaitTimeout);
+        while (!condition())
+        {
+            if (DateTime.UtcNow >= deadline)
+                return false;
+
+            Thread.Sleep(20);
+        }
+
+        return true;
+    }
+
+    /// <inheritdoc cref="WaitUntil"/>
+    public static async Task<bool> WaitUntilAsync(Func<bool> condition, TimeSpan? timeout = null)
+    {
+        var deadline = DateTime.UtcNow + (timeout ?? DefaultWaitTimeout);
+        while (!condition())
+        {
+            if (DateTime.UtcNow >= deadline)
+                return false;
+
+            await Task.Delay(20, Xunit.TestContext.Current.CancellationToken);
+        }
+
+        return true;
+    }
+
+    private static readonly TimeSpan DefaultWaitTimeout = TimeSpan.FromSeconds(15);
+
     public static bool IsProcessRunning(int processId)
     {
         try

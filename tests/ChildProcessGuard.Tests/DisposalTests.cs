@@ -211,7 +211,7 @@ public class DisposalTests
 
         // Start and let a process exit
         var process = guardian.StartProcess(GetShortLivedExecutable(), GetShortLivedArguments());
-        await Task.Delay(500, TestContext.Current.CancellationToken); // Wait for process to exit
+        await WaitUntilAsync(() => process.HasExited);
 
         // Act
         guardian.Dispose();

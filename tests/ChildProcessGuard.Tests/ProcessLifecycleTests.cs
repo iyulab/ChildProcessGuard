@@ -41,15 +41,6 @@ public class ProcessLifecycleTests : IDisposable
         ? new ProcessStartInfo("cmd.exe", "/c exit 0") { UseShellExecute = false, CreateNoWindow = true }
         : new ProcessStartInfo("/bin/sh", "-c \"exit 0\"") { UseShellExecute = false };
 
-    private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
-    {
-        var deadline = DateTime.UtcNow + timeout;
-        while (!condition() && DateTime.UtcNow < deadline)
-        {
-            await Task.Delay(20, TestContext.Current.CancellationToken);
-        }
-    }
-
     [Fact]
     [Trait("Category", "Fast")]
     public void ManagedProcessInfo_Id_RemainsReadableAfterProcessIsDisposed()

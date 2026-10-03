@@ -134,11 +134,7 @@ public class ProcessGuardianTests : IDisposable
         terminatedCount.Should().Be(2);
         _guardian.ManagedProcessCount.Should().Be(0);
 
-        // Wait a bit for processes to fully terminate
-        await Task.Delay(500, TestContext.Current.CancellationToken);
-
-        process1.HasExited.Should().BeTrue();
-        process2.HasExited.Should().BeTrue();
+        (await WaitUntilAsync(() => process1.HasExited && process2.HasExited)).Should().BeTrue();
     }
 
     [Fact]
@@ -222,12 +218,8 @@ public class ProcessGuardianTests : IDisposable
         // Assert
         _guardian.IsDisposed.Should().BeTrue();
 
-        // Wait for termination
-        Thread.Sleep(1000);
-
         // Process should be terminated
-        var stillRunning = IsProcessRunning(processId);
-        stillRunning.Should().BeFalse();
+        WaitUntil(() => !IsProcessRunning(processId)).Should().BeTrue();
     }
 
     [Fact]
@@ -290,7 +282,7 @@ public class ProcessGuardianTests : IDisposable
 
         // Act
         var process = _guardian.StartProcess(GetShortLivedExecutable(), GetShortLivedArguments());
-        await Task.Delay(2000, TestContext.Current.CancellationToken); // Wait for process to exit
+        await WaitUntilAsync(() => exitEvent != null);
 
         // Assert
         exitEvent.Should().NotBeNull();

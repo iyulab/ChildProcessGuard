@@ -59,7 +59,7 @@ public class UnixSpecificTests : IDisposable
 
         // Assert
         terminatedCount.Should().Be(1);
-        process.WaitForExit(2000).Should().BeTrue();
+        process.WaitForExit(10000).Should().BeTrue();
         process.ExitCode.Should().Be(0, "the child should have exited from its SIGTERM trap, not from SIGKILL");
     }
 
@@ -67,13 +67,14 @@ public class UnixSpecificTests : IDisposable
     public async Task ForcedTermination_OnUnix_KillsDescendants_AndSparesTheCaller()
     {
         // Arrange - root and grandchild shells both ignore SIGTERM; the grandchild's pid is reported on stdout
+        // (the grandchild's loop is bounded: a survivor holding the test output pipe must not hang the run)
         _guardian = new ProcessGuardian(new ProcessGuardianOptions
         {
             ProcessKillTimeout = TimeSpan.FromMilliseconds(300),
             ForceKillOnTimeout = true,
         });
         var process = StartShell(
-            "trap '' TERM; sh -c 'trap \"\" TERM; while :; do sleep 1; done' & echo $!; wait",
+            "trap '' TERM; sh -c 'trap \"\" TERM; i=0; while [ $i -lt 30 ]; do sleep 1; i=$((i+1)); done' & echo $!; wait",
             redirectStandardOutput: true);
         var grandchildPid = int.Parse(process.StandardOutput.ReadLine()!);
         await Task.Delay(200, TestContext.Current.CancellationToken);
@@ -82,10 +83,8 @@ public class UnixSpecificTests : IDisposable
         await _guardian.KillAllProcessesAsync();
 
         // Assert - the tree is gone and this process is still here to observe it
-        process.WaitForExit(2000).Should().BeTrue();
-        await Task.Delay(300, TestContext.Current.CancellationToken);
-        var grandchildAlive = () => Process.GetProcessById(grandchildPid);
-        grandchildAlive.Should().Throw<ArgumentException>("the grandchild shell should have been killed with the tree");
+        process.WaitForExit(10000).Should().BeTrue();
+        (await WaitUntilAsync(() => !IsProcessRunning(grandchildPid))).Should().BeTrue("the grandchild shell should have been killed with the tree");
     }
 
     [Fact(SkipWhen = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires a Unix platform")]
@@ -94,7 +93,7 @@ public class UnixSpecificTests : IDisposable
         // Exercises the portable tree kill directly, independent of the runtime's Kill(entireProcessTree).
         using var process = Process.Start(new ProcessStartInfo("/bin/sh")
         {
-            ArgumentList = { "-c", "trap '' TERM; sh -c 'trap \"\" TERM; while :; do sleep 1; done' & echo $!; wait" },
+            ArgumentList = { "-c", "trap '' TERM; sh -c 'trap \"\" TERM; i=0; while [ $i -lt 30 ]; do sleep 1; i=$((i+1)); done' & echo $!; wait" },
             UseShellExecute = false,
             RedirectStandardOutput = true,
         })!;
@@ -103,10 +102,8 @@ public class UnixSpecificTests : IDisposable
         var delivered = CompatibilityExtensions.SignalProcessTreeUnix(process.Id, 9);
 
         delivered.Should().BeTrue();
-        process.WaitForExit(2000).Should().BeTrue();
-        Thread.Sleep(300);
-        var grandchildAlive = () => Process.GetProcessById(grandchildPid);
-        grandchildAlive.Should().Throw<ArgumentException>();
+        process.WaitForExit(10000).Should().BeTrue();
+        WaitUntil(() => !IsProcessRunning(grandchildPid)).Should().BeTrue("the grandchild shell should have been killed with the tree");
     }
 
     [Fact(SkipWhen = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires a Unix platform")]
@@ -123,12 +120,7 @@ public class UnixSpecificTests : IDisposable
 
         // Assert
         terminatedCount.Should().Be(3);
-
-        await Task.Delay(500, TestContext.Current.CancellationToken);
-
-        process1.HasExited.Should().BeTrue();
-        process2.HasExited.Should().BeTrue();
-        process3.HasExited.Should().BeTrue();
+        (await WaitUntilAsync(() => process1.HasExited && process2.HasExited && process3.HasExited)).Should().BeTrue();
     }
 
     [Fact(SkipWhen = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires a Unix platform")]
@@ -183,11 +175,32 @@ public class UnixSpecificTests : IDisposable
         // Assert
         _guardian.IsDisposed.Should().BeTrue();
 
-        // Wait for cleanup
-        await Task.Delay(1000, TestContext.Current.CancellationToken);
+        (await WaitUntilAsync(() => !IsProcessRunning(processId))).Should().BeTrue("Process should be terminated on Dispose");
+    }
 
-        var stillRunning = IsProcessRunning(processId);
-        stillRunning.Should().BeFalse("Process should be terminated on Dispose");
+    [Fact(SkipWhen = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires a Unix platform")]
+    public void GetDescendantProcessIdsUnix_FindsChildAndGrandchild()
+    {
+        using var process = Process.Start(new ProcessStartInfo("/bin/sh")
+        {
+            ArgumentList = { "-c", "sh -c 'sleep 30 & echo $!; wait' & wait" },
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+        })!;
+
+        try
+        {
+            var grandchildPid = int.Parse(process.StandardOutput.ReadLine()!);
+
+            var descendants = new List<int>();
+            WaitUntil(() => (descendants = CompatibilityExtensions.GetDescendantProcessIdsUnix(process.Id)).Contains(grandchildPid))
+                .Should().BeTrue($"the walk from {process.Id} should reach grandchild {grandchildPid}; found [{string.Join(", ", descendants)}]");
+            descendants.Should().HaveCount(2, "the tree is root shell -> inner shell -> sleep");
+        }
+        finally
+        {
+            process.KillProcessTree(entireProcessTree: true);
+        }
     }
 
     private Process StartShell(string script, bool redirectStandardOutput = false)
