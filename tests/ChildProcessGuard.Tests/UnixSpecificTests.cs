@@ -76,7 +76,7 @@ public class UnixSpecificTests : IDisposable
         var process = StartShell(
             "trap '' TERM; sh -c 'trap \"\" TERM; i=0; while [ $i -lt 30 ]; do sleep 1; i=$((i+1)); done' & echo $!; wait",
             redirectStandardOutput: true);
-        var grandchildPid = int.Parse(process.StandardOutput.ReadLine()!);
+        var grandchildPid = int.Parse(ReadLineOrFail(process));
         await Task.Delay(200, TestContext.Current.CancellationToken);
 
         // Act
@@ -97,7 +97,7 @@ public class UnixSpecificTests : IDisposable
             UseShellExecute = false,
             RedirectStandardOutput = true,
         })!;
-        var grandchildPid = int.Parse(process.StandardOutput.ReadLine()!);
+        var grandchildPid = int.Parse(ReadLineOrFail(process));
 
         var delivered = CompatibilityExtensions.SignalProcessTreeUnix(process.Id, 9);
 
@@ -190,7 +190,7 @@ public class UnixSpecificTests : IDisposable
 
         try
         {
-            var grandchildPid = int.Parse(process.StandardOutput.ReadLine()!);
+            var grandchildPid = int.Parse(ReadLineOrFail(process));
 
             var descendants = new List<int>();
             WaitUntil(() => (descendants = CompatibilityExtensions.GetDescendantProcessIdsUnix(process.Id)).Contains(grandchildPid))

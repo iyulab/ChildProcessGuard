@@ -72,6 +72,28 @@ internal static class TestProcesses
 
     private static readonly TimeSpan DefaultWaitTimeout = TimeSpan.FromSeconds(15);
 
+    /// <summary>
+    /// Waits for a process to exit, failing instead of blocking forever if it does not.
+    /// </summary>
+    public static void WaitForExitOrFail(Process process, TimeSpan? timeout = null)
+    {
+        if (!process.WaitForExit((int)(timeout ?? DefaultWaitTimeout).TotalMilliseconds))
+            throw new TimeoutException($"Process {process.Id} did not exit within the timeout");
+    }
+
+    /// <summary>
+    /// Reads one line of a child's redirected standard output, failing instead of blocking forever
+    /// if the child never writes it.
+    /// </summary>
+    public static string ReadLineOrFail(Process process, TimeSpan? timeout = null)
+    {
+        var read = process.StandardOutput.ReadLineAsync();
+        if (!read.Wait(timeout ?? DefaultWaitTimeout))
+            throw new TimeoutException($"Process {process.Id} wrote no line to standard output within the timeout");
+
+        return read.Result ?? throw new InvalidOperationException($"Process {process.Id} closed standard output without writing a line");
+    }
+
     public static bool IsProcessRunning(int processId)
     {
         try

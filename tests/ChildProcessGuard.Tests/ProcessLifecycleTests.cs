@@ -140,7 +140,7 @@ public class ProcessLifecycleTests : IDisposable
     {
         using var process = Process.Start(ShortLivedChild())!;
         var info = new ManagedProcessInfo(process, "child", string.Empty);
-        process.WaitForExit();
+        WaitForExitOrFail(process);
 
         // Exit time is reported in local time and the start time in UTC; on any machine whose
         // clock is not at UTC, mixing the two shifts the runtime by hours.
@@ -154,7 +154,7 @@ public class ProcessLifecycleTests : IDisposable
         _guardian = new ProcessGuardian(NoTimerOptions());
 
         using var process = _guardian.StartProcessWithStartInfo(ShortLivedChild());
-        process.WaitForExit();
+        WaitForExitOrFail(process);
         await WaitUntilAsync(() => _guardian.ManagedProcessCount == 0, TimeSpan.FromSeconds(5));
 
         _guardian.ManagedProcessCount.Should().Be(0);
@@ -174,7 +174,7 @@ public class ProcessLifecycleTests : IDisposable
         for (var i = 0; i < 3; i++)
         {
             using var process = _guardian.StartProcessWithStartInfo(ShortLivedChild());
-            process.WaitForExit();
+            WaitForExitOrFail(process);
             await WaitUntilAsync(() => _guardian.ManagedProcessCount == 0, TimeSpan.FromSeconds(5));
         }
 
@@ -192,7 +192,7 @@ public class ProcessLifecycleTests : IDisposable
         });
 
         using var process = _guardian.StartProcessWithStartInfo(ShortLivedChild());
-        process.WaitForExit();
+        WaitForExitOrFail(process);
         await WaitUntilAsync(() => _guardian.ManagedProcessCount == 0, TimeSpan.FromSeconds(5));
         await Task.Delay(200, TestContext.Current.CancellationToken); // let at least one cleanup sweep run after the exit
 
@@ -216,7 +216,7 @@ public class ProcessLifecycleTests : IDisposable
 
             foreach (var process in processes)
             {
-                process.WaitForExit();
+                WaitForExitOrFail(process);
                 process.Dispose();
             }
         }
@@ -229,7 +229,7 @@ public class ProcessLifecycleTests : IDisposable
         _guardian = new ProcessGuardian(NoTimerOptions());
 
         var process = _guardian.StartProcessWithStartInfo(ShortLivedChild());
-        process.WaitForExit();
+        WaitForExitOrFail(process);
         process.Dispose();
 
         // The entry may already have been reaped by the exit notification; either way, the call
