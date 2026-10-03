@@ -302,7 +302,7 @@ using var custom = new ProcessGuardianBuilder()
 ### Unix Implementation (Linux/macOS)
 - Tracks descendants by walking parent pids from one snapshot of the process table (`/proc` on Linux, `libproc` on macOS)
 - Sends `SIGTERM` to the process and its descendants for graceful termination, then `SIGKILL` after the timeout
-- On .NET 8+ the forced kill uses `Process.Kill(entireProcessTree: true)`; the .NET Standard builds use the same descendant walk for it
+- Only signals a process the process table shows running as a child of the caller, and that child's descendants: a child that has already exited, or a pid that has been reaped and possibly reused, is never signalled
 - Never signals process groups: children share the parent's group, so a group signal would reach the calling application
 
 ### Termination Sequence

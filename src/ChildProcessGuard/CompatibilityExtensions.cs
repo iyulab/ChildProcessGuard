@@ -86,49 +86,40 @@ internal static class CompatibilityExtensions
             return;
         }
 
+        // Not delegated to the runtime's Process.Kill(entireProcessTree) on any target. On Windows it
+        // opens every process on the machine to find descendants, which takes seconds on a busy system;
+        // on Unix it stops and kills whatever its own process scan reports as children, without the
+        // running-child check SignalProcessTreeUnix applies, and running many children concurrently on
+        // macOS that way left the calling environment unresponsive.
         try
         {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                // Not delegated to the runtime on Windows: Process.Kill(entireProcessTree) opens every
-                // process on the machine to find descendants, which takes seconds on a busy system.
                 KillProcessTreeWindows(process.Id);
                 return;
             }
 
-#if NET5_0_OR_GREATER
-            try
-            {
-                process.Kill(entireProcessTree: true);
+            if (SignalProcessTreeUnix(process.Id, NativeMethods.SIGKILL))
                 return;
-            }
-            catch (InvalidOperationException)
-            {
-                // Process already exited
-                return;
-            }
-            catch
-            {
-                // Fall through to the portable implementation
-            }
-#endif
-
-            SignalProcessTreeUnix(process.Id, NativeMethods.SIGKILL);
         }
         catch
         {
-            // Fallback to simple kill
-            try
+            // Fall back to killing the process itself below
+        }
+
+        // The tree could not be signalled: the process has exited (or is exiting), or the process table
+        // could not be read. Process.Kill on the process itself is safe either way, as the runtime only
+        // signals a child it has not yet seen exit.
+        try
+        {
+            if (!process.HasExited)
             {
-                if (!process.HasExited)
-                {
-                    process.Kill();
-                }
+                process.Kill();
             }
-            catch
-            {
-                // Process already exited or disposed
-            }
+        }
+        catch
+        {
+            // Process already exited or disposed
         }
     }
 
