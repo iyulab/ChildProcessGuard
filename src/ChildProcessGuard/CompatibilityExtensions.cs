@@ -202,7 +202,7 @@ internal static class CompatibilityExtensions
         {
             var entry = new NativeMethods.PROCESSENTRY32
             {
-                dwSize = (uint)Marshal.SizeOf(typeof(NativeMethods.PROCESSENTRY32))
+                dwSize = (uint)Marshal.SizeOf<NativeMethods.PROCESSENTRY32>()
             };
 
             if (!NativeMethods.Process32First(snapshot, ref entry))

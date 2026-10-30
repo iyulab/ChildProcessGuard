@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Publishes the library as a Native AOT executable and exercises it: the net10.0 build declares
+    IsAotCompatible, and this is the check that the declaration holds on a real AOT publish.
+    Trim and AOT warnings fail the publish, so a regression in the library cannot slip through as a warning.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <PublishAot>true</PublishAot>
+    <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ChildProcessGuard\ChildProcessGuard.csproj" />
+  </ItemGroup>
+
+</Project>

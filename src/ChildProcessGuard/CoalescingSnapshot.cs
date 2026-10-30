@@ -1,3 +1,5 @@
+using System.Runtime.ExceptionServices;
+
 namespace ChildProcessGuard;
 
 /// <summary>
@@ -16,7 +18,7 @@ internal sealed class CoalescingSnapshot<T>
     private readonly Func<T> _take;
     private readonly object _pendingLock = new();
     private readonly object _takeLock = new();
-    private Lazy<T>? _pending;
+    private Pending? _pending;
 
     public CoalescingSnapshot(Func<T> take)
     {
@@ -29,23 +31,16 @@ internal sealed class CoalescingSnapshot<T>
     /// </summary>
     public T Get()
     {
-        Lazy<T> next;
+        Pending next;
         lock (_pendingLock)
         {
-            if (_pending == null)
-            {
-                Lazy<T>? created = null;
-                created = new Lazy<T>(() => Take(created!), LazyThreadSafetyMode.ExecutionAndPublication);
-                _pending = created;
-            }
-
-            next = _pending;
+            next = _pending ??= new Pending(this);
         }
 
-        return next.Value;
+        return next.GetValue();
     }
 
-    private T Take(Lazy<T> self)
+    private T Take(Pending self)
     {
         lock (_takeLock)
         {
@@ -57,6 +52,50 @@ internal sealed class CoalescingSnapshot<T>
             }
 
             return _take();
+        }
+    }
+
+    /// <summary>
+    /// One snapshot that is taken by the first caller to ask for its value while the others wait,
+    /// and whose outcome — value or exception — every caller sharing it observes.
+    /// </summary>
+    /// <remarks>
+    /// Stands in for <see cref="Lazy{T}"/>, whose <c>T</c> carries a trimming annotation for its
+    /// parameterless-constructor path that this class has no use for.
+    /// </remarks>
+    private sealed class Pending
+    {
+        private readonly CoalescingSnapshot<T> _owner;
+        private bool _taken;
+        private T? _value;
+        private ExceptionDispatchInfo? _error;
+
+        public Pending(CoalescingSnapshot<T> owner)
+        {
+            _owner = owner;
+        }
+
+        public T GetValue()
+        {
+            lock (this)
+            {
+                if (!_taken)
+                {
+                    try
+                    {
+                        _value = _owner.Take(this);
+                    }
+                    catch (Exception ex)
+                    {
+                        _error = ExceptionDispatchInfo.Capture(ex);
+                    }
+
+                    _taken = true;
+                }
+            }
+
+            _error?.Throw();
+            return _value!;
         }
     }
 }

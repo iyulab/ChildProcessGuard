@@ -30,7 +30,7 @@ A cross-platform .NET library that ensures child processes automatically termina
 |---|---|
 | `netstandard2.0` | Supported |
 | `netstandard2.1` | Supported |
-| `net10.0` | Supported |
+| `net10.0` | Supported; trimming and Native AOT compatible (`IsAotCompatible`) |
 
 ## Installation
 

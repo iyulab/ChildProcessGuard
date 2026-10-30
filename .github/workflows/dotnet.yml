@@ -17,6 +17,7 @@ on:
 env:
   PROJECT_PATH: 'src/ChildProcessGuard/ChildProcessGuard.csproj'
   TEST_PATH: 'tests/ChildProcessGuard.Tests/ChildProcessGuard.Tests.csproj'
+  AOT_SMOKE_PATH: 'tests/ChildProcessGuard.AotSmoke/ChildProcessGuard.AotSmoke.csproj'
 
 jobs:
   build-test:
@@ -56,8 +57,38 @@ jobs:
       timeout-minutes: 15
       run: dotnet test --project ${{ env.TEST_PATH }} --configuration Release --no-build --output Detailed --long-running 60
 
+  # The net10.0 build declares IsAotCompatible; this publishes a small executable with Native AOT
+  # (trim and AOT warnings fail the publish) and has it start, terminate and verify a process tree.
+  aot-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: ubuntu-24.04-arm
+            rid: linux-arm64
+          - os: windows-latest
+            rid: win-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v6
+      with:
+        dotnet-version: 10.0.x
+
+    - name: Publish with Native AOT
+      run: dotnet publish ${{ env.AOT_SMOKE_PATH }} --configuration Release --runtime ${{ matrix.rid }} --output aot-smoke
+
+    - name: Run
+      timeout-minutes: 5
+      shell: bash
+      run: ./aot-smoke/ChildProcessGuard.AotSmoke
+
   publish:
-    needs: build-test
+    needs: [build-test, aot-smoke]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

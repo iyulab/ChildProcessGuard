@@ -3,6 +3,14 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- The `net10.0` build is declared trimming and Native AOT compatible (`IsAotCompatible`), and CI publishes a small Native AOT executable on Linux (x64, arm64) and Windows that starts a process tree, terminates it and verifies that it is gone.
+
+### Changed
+- Internal: the snapshot sharing used by concurrent process-tree walks no longer goes through `Lazy<T>`, and the Windows process-table read uses `Marshal.SizeOf<T>()`; both removed the trim and AOT analysis warnings of the `net10.0` build. Behavior is unchanged.
+
 ## [1.4.0] - 2026-10-04
 
 ### Added
