@@ -18,6 +18,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\ChildProcessGuard\ChildProcessGuard.csproj" />
+    <!-- A separate process that owns a guardian, started and ended by the owner-death tests. Built before the tests; its output folder is fixed. -->
+    <ProjectReference Include="..\ChildProcessGuard.OwnerHarness\ChildProcessGuard.OwnerHarness.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" SetTargetFramework="TargetFramework=net10.0" />
   </ItemGroup>
 
 </Project>
