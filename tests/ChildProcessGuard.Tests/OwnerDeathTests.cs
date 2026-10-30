@@ -17,7 +17,9 @@ public sealed class OwnerDeathTests : IDisposable
         AppContext.BaseDirectory, "..", "..", "..", "..", "ChildProcessGuard.OwnerHarness", "bin", "harness"));
 
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "cpg-owner-" + Guid.NewGuid().ToString("N"));
-    private readonly List<int> _pids = new();
+    // Process objects, not bare IDs: a handle keeps the operating system from giving the ID to another
+    // process, so "has it ended" and the cleanup below cannot be fooled by an ID that was reused.
+    private readonly List<Process> _processes = new();
     private Process? _owner;
 
     public OwnerDeathTests()
@@ -28,8 +30,20 @@ public sealed class OwnerDeathTests : IDisposable
     public void Dispose()
     {
         // Whatever a test left behind must not outlive it: this would otherwise leave sleepers on the machine
-        foreach (var pid in _pids)
-            Kill(pid);
+        foreach (var process in _processes)
+        {
+            try
+            {
+                if (!process.HasExited)
+                    process.Kill();
+            }
+            catch
+            {
+                // Already gone
+            }
+
+            process.Dispose();
+        }
 
         if (_owner != null)
         {
@@ -51,7 +65,7 @@ public sealed class OwnerDeathTests : IDisposable
         File.WriteAllText(pidFile + ".go", "");
         WaitForExitOrFail(_owner!);
 
-        (await WaitUntilAsync(() => _pids.All(pid => !IsProcessRunning(pid)))).Should().BeTrue(
+        (await WaitUntilAsync(() => _processes.All(process => process.HasExited))).Should().BeTrue(
             "the children of an owner that exits should end with it");
     }
 
@@ -66,7 +80,7 @@ public sealed class OwnerDeathTests : IDisposable
         _owner!.Kill();
         WaitForExitOrFail(_owner);
 
-        (await WaitUntilAsync(() => _pids.All(pid => !IsProcessRunning(pid)))).Should().BeTrue(
+        (await WaitUntilAsync(() => _processes.All(process => process.HasExited))).Should().BeTrue(
             "the job object ends the children of an owner that was killed");
     }
 
@@ -83,7 +97,7 @@ public sealed class OwnerDeathTests : IDisposable
 
         // The handler cleans up and does not cancel the signal: the owner ends as a SIGTERM ends it (128 + 15)
         _owner.ExitCode.Should().Be(143);
-        (await WaitUntilAsync(() => _pids.All(pid => !IsProcessRunning(pid)))).Should().BeTrue(
+        (await WaitUntilAsync(() => _processes.All(process => process.HasExited))).Should().BeTrue(
             "the children of an owner that received SIGTERM should end with it when the option is set");
     }
 #endif
@@ -108,9 +122,21 @@ public sealed class OwnerDeathTests : IDisposable
     /// </summary>
     private void WaitForChildTree(string pidFile)
     {
-        WaitUntil(() => File.Exists(pidFile)).Should().BeTrue("the owner should report its child");
-        var childId = int.Parse(File.ReadAllText(pidFile).Trim());
-        _pids.Add(childId);
+        // The file can be held for a moment right after it appears (a scanner, an indexer), so a failed
+        // read is retried like a missing file
+        var childId = 0;
+        WaitUntil(() =>
+        {
+            try
+            {
+                return int.TryParse(File.ReadAllText(pidFile).Trim(), out childId);
+            }
+            catch (IOException)
+            {
+                return false;
+            }
+        }).Should().BeTrue("the owner should report its child");
+        _processes.Add(Process.GetProcessById(childId));
 
         List<int> descendants = new();
         WaitUntil(() =>
@@ -120,19 +146,7 @@ public sealed class OwnerDeathTests : IDisposable
                 : CompatibilityExtensions.GetDescendantProcessIdsUnix(childId);
             return descendants.Count > 0;
         }).Should().BeTrue("the child should have a child of its own");
-        _pids.AddRange(descendants);
-    }
-
-    private static void Kill(int pid)
-    {
-        try
-        {
-            using var process = Process.GetProcessById(pid);
-            process.Kill();
-        }
-        catch
-        {
-            // Already gone
-        }
+        foreach (var descendant in descendants)
+            _processes.Add(Process.GetProcessById(descendant));
     }
 }

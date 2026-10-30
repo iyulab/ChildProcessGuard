@@ -11,29 +11,36 @@ namespace ChildProcessGuard.Tests;
 /// </summary>
 public class ChildrenOutliveOwnerTests : IDisposable
 {
-    private readonly List<int> _started = new();
+    // The Process objects are kept, not just their IDs: while one is alive its handle stops the operating
+    // system from giving the ID to another process, and Windows reuses IDs fast. Looking a process up by ID
+    // some time after it ended can find an unrelated process that was given the same ID.
+    private readonly List<Process> _started = new();
 
     public void Dispose()
     {
-        foreach (var processId in _started)
+        foreach (var process in _started)
         {
             try
             {
-                using var process = Process.GetProcessById(processId);
-                process.Kill();
+                if (!process.HasExited)
+                    process.Kill();
             }
             catch (Exception)
             {
                 // Already gone
             }
+            finally
+            {
+                process.Dispose();
+            }
         }
     }
 
-    private int StartLongRunning(ProcessGuardian guardian)
+    private Process StartLongRunning(ProcessGuardian guardian)
     {
         var process = guardian.StartProcess(GetLongRunningExecutable(), GetLongRunningArguments());
-        _started.Add(process.Id);
-        return process.Id;
+        _started.Add(process);
+        return process;
     }
 
     [Fact]
@@ -66,7 +73,7 @@ public class ChildrenOutliveOwnerTests : IDisposable
     public async Task Dispose_LeavesChildrenRunning()
     {
         var guardian = new ProcessGuardianBuilder().WithChildrenOutliveOwner().Build();
-        var processId = StartLongRunning(guardian);
+        var process = StartLongRunning(guardian);
         guardian.ManagedProcessCount.Should().Be(1);
 
         guardian.Dispose();
@@ -74,7 +81,7 @@ public class ChildrenOutliveOwnerTests : IDisposable
 
         guardian.IsDisposed.Should().BeTrue();
         guardian.ManagedProcessCount.Should().Be(0);
-        IsProcessRunning(processId).Should().BeTrue();
+        process.HasExited.Should().BeFalse();
     }
 
     [Fact]
@@ -82,13 +89,13 @@ public class ChildrenOutliveOwnerTests : IDisposable
     public async Task DisposeAsync_LeavesChildrenRunning()
     {
         var guardian = new ProcessGuardianBuilder().WithChildrenOutliveOwner().Build();
-        var processId = StartLongRunning(guardian);
+        var process = StartLongRunning(guardian);
 
         await guardian.DisposeAsync();
         await Task.Delay(1500, TestContext.Current.CancellationToken);
 
         guardian.ManagedProcessCount.Should().Be(0);
-        IsProcessRunning(processId).Should().BeTrue();
+        process.HasExited.Should().BeFalse();
     }
 
     [Fact]
@@ -96,12 +103,12 @@ public class ChildrenOutliveOwnerTests : IDisposable
     public async Task KillAllProcessesAsync_StillTerminatesChildren()
     {
         using var guardian = new ProcessGuardianBuilder().WithChildrenOutliveOwner().Build();
-        var processId = StartLongRunning(guardian);
+        var process = StartLongRunning(guardian);
 
         var terminated = await guardian.KillAllProcessesAsync(TimeSpan.FromSeconds(5));
 
         terminated.Should().Be(1);
-        WaitUntil(() => !IsProcessRunning(processId)).Should().BeTrue();
+        WaitUntil(() => process.HasExited).Should().BeTrue();
     }
 
     [Fact]
@@ -109,12 +116,12 @@ public class ChildrenOutliveOwnerTests : IDisposable
     public async Task TerminateProcessAsync_StillTerminatesChild()
     {
         using var guardian = new ProcessGuardianBuilder().WithChildrenOutliveOwner().Build();
-        var processId = StartLongRunning(guardian);
+        var process = StartLongRunning(guardian);
 
-        var exited = await guardian.TerminateProcessAsync(processId, TimeSpan.FromSeconds(5));
+        var exited = await guardian.TerminateProcessAsync(process.Id, TimeSpan.FromSeconds(5));
 
         exited.Should().BeTrue();
-        WaitUntil(() => !IsProcessRunning(processId)).Should().BeTrue();
+        WaitUntil(() => process.HasExited).Should().BeTrue();
     }
 
     [Fact]
@@ -122,11 +129,11 @@ public class ChildrenOutliveOwnerTests : IDisposable
     public async Task Dispose_WithoutOption_StillTerminatesChildren()
     {
         var guardian = new ProcessGuardian();
-        var processId = StartLongRunning(guardian);
+        var process = StartLongRunning(guardian);
 
         guardian.Dispose();
         await Task.Delay(1500, TestContext.Current.CancellationToken);
 
-        IsProcessRunning(processId).Should().BeFalse();
+        process.HasExited.Should().BeTrue();
     }
 }
