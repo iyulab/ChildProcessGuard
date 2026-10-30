@@ -247,6 +247,21 @@ using var guardian = new ProcessGuardianBuilder()
 
 Return `false` to fall back to the built-in request for that process. The callback should only deliver the request, not wait for the exit — the guardian does the waiting. See [Termination Sequence](#termination-sequence).
 
+### Children That Outlive Their Owner
+
+By default the children end with their owner, which is the point of the library. A launcher or updater that starts a long-lived child and then exits on purpose can opt out:
+
+```csharp
+var guardian = new ProcessGuardianBuilder()
+    .WithChildrenOutliveOwner()
+    .Build();
+
+var backend = guardian.StartProcess("backend", "--serve");
+// ... hand over and exit: the backend keeps running
+```
+
+While the guardian lives it still tracks the children, and `KillAllProcessesAsync` and `TerminateProcessAsync` terminate them as usual. `Dispose`, the exit of the process and Ctrl+C release the children instead. On Windows the job object is created without `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`; on Unix nothing signals the children when the guardian is disposed. The guarantee that the children are cleaned up is gone for such a guardian: if the owner crashes or is killed, they keep running and the caller is responsible for them.
+
 ### Cross-Platform Example
 
 ```csharp
@@ -284,7 +299,8 @@ var options = new ProcessGuardianOptions
     CleanupInterval = TimeSpan.FromMinutes(5),          // Interval of the fallback sweep
     ThrowOnProcessOperationFailure = false,             // Exception handling behavior
     LogAction = msg => Console.WriteLine(msg),          // Custom log handler (optional)
-    CloseRequest = null                                 // Custom graceful close request (optional)
+    CloseRequest = null,                                // Custom graceful close request (optional)
+    ChildrenOutliveOwner = false                        // Leave the children running when the owner exits
 };
 
 using var guardian = new ProcessGuardian(options);

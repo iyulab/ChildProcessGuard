@@ -433,7 +433,11 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
 
             try
             {
-                KillAllProcesses();
+                if (_options.ChildrenOutliveOwner)
+                    ReleaseAllProcesses();
+                else
+                    KillAllProcesses();
+
                 _managedProcesses.Clear(); // Ensure all processes are removed
             }
             catch (Exception ex)
@@ -460,13 +464,30 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
 
         try
         {
-            await KillAllProcessesAsync().ConfigureAwait(false);
+            if (_options.ChildrenOutliveOwner)
+                ReleaseAllProcesses();
+            else
+                await KillAllProcessesAsync().ConfigureAwait(false);
+
             _managedProcesses.Clear(); // Ensure all processes are removed
         }
         catch (Exception ex)
         {
             OnProcessError("DisposeAsync", ex);
         }
+    }
+
+    /// <summary>
+    /// Stops managing every process without touching it. Used on disposal when
+    /// <see cref="ProcessGuardianOptions.ChildrenOutliveOwner"/> is set.
+    /// </summary>
+    private void ReleaseAllProcesses()
+    {
+        var processes = _managedProcesses.Values.ToList();
+        foreach (var processInfo in processes)
+            Untrack(processInfo, ProcessLifecycleEventType.ProcessRemoved);
+
+        LogMessage($"Released {processes.Count} managed processes without terminating them", LogLevel.Information);
     }
 
     /// <summary>
@@ -683,6 +704,13 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
             {
                 var error = Marshal.GetLastWin32Error();
                 LogMessage($"Failed to create job object (Error: {error}). Using manual process tracking.", LogLevel.Warning);
+                return;
+            }
+
+            if (_options.ChildrenOutliveOwner)
+            {
+                // No limit flags: the job still tracks its processes, but closing it does not end them.
+                LogMessage("Windows Job Object initialized without kill-on-close", LogLevel.Debug);
                 return;
             }
 

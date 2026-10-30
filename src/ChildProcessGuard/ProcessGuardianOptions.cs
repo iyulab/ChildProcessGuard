@@ -80,6 +80,32 @@ public class ProcessGuardianOptions
     public Func<ManagedProcessInfo, bool>? CloseRequest { get; set; }
 
     /// <summary>
+    /// Whether the managed processes keep running after the guardian is disposed or its owner exits.
+    /// The default, <c>false</c>, is the point of the library: the children end with their owner.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For a process that starts a long-lived child and then exits on purpose — a launcher that hands
+    /// over to the application it started, or an updater that restarts it. While the guardian lives
+    /// nothing changes: the processes are tracked, <see cref="ProcessGuardian.KillAllProcessesAsync"/>
+    /// and <see cref="ProcessGuardian.TerminateProcessAsync(int, TimeSpan?)"/> terminate them with the
+    /// same two-stage sequence, and <see cref="CloseRequest"/> applies.
+    /// </para>
+    /// <para>
+    /// <see cref="ProcessGuardian.Dispose()"/>, the exit of the owning process and Ctrl+C release the
+    /// processes instead of terminating them. On Windows the job object is created without
+    /// <c>JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE</c>, so closing it leaves its processes running; this has
+    /// to be decided when the guardian is created, because a process cannot leave a job once it is in
+    /// one. On Unix nothing signals the processes on disposal.
+    /// </para>
+    /// <para>
+    /// The guarantee that gives the library its name is gone for such a guardian: if the owner crashes
+    /// or is killed, its children are not cleaned up, and the caller is responsible for them.
+    /// </para>
+    /// </remarks>
+    public bool ChildrenOutliveOwner { get; set; } = false;
+
+    /// <summary>
     /// Creates a default configuration
     /// </summary>
     /// <returns>Default ProcessGuardianOptions</returns>
@@ -127,7 +153,8 @@ public class ProcessGuardianOptions
             CleanupInterval = this.CleanupInterval,
             ThrowOnProcessOperationFailure = this.ThrowOnProcessOperationFailure,
             LogAction = this.LogAction,
-            CloseRequest = this.CloseRequest
+            CloseRequest = this.CloseRequest,
+            ChildrenOutliveOwner = this.ChildrenOutliveOwner
         };
     }
 }

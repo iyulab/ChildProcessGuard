@@ -6,6 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [Unreleased]
 
 ### Added
+- `ProcessGuardianOptions.ChildrenOutliveOwner` and `ProcessGuardianBuilder.WithChildrenOutliveOwner` let the managed processes keep running after the guardian is disposed or its owner exits, for a launcher or updater that starts a long-lived child and then exits on purpose. While the guardian lives the processes are tracked and terminated as usual (`KillAllProcessesAsync`, `TerminateProcessAsync`, `CloseRequest`); `Dispose`, process exit and Ctrl+C release them instead. On Windows the job object is created without `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`; on Unix nothing signals the processes on disposal. The default is unchanged: children end with their owner.
 - The `net10.0` build is declared trimming and Native AOT compatible (`IsAotCompatible`), and CI publishes a small Native AOT executable on Linux (x64, arm64) and Windows that starts a process tree, terminates it and verifies that it is gone.
 
 ### Changed

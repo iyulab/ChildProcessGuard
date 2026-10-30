@@ -2,16 +2,37 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using ChildProcessGuard;
 
-// Native AOT smoke test. The executable plays three roles:
-//   (no arguments)      the test: starts a child that has a child of its own, terminates the tree, checks it is gone
-//   --child             the child: starts a long-running grandchild, reports its pid, then idles
-//   --child --stubborn  the same, but ignores SIGTERM so that the forced stage has to finish the job
-if (args.Length > 0 && args[0] == "--child")
-    return RunChild(stubborn: args.Length > 1 && args[1] == "--stubborn");
+// Native AOT smoke test. The executable plays several roles:
+//   (no arguments)             the test: runs the scenarios below
+//   --child [--stubborn]       a child that starts a long-running grandchild, reports its pid, then idles;
+//                              --stubborn ignores SIGTERM so that the forced stage has to finish the job
+//   --sleep                    a process that does nothing until it is terminated
+//   --owner <file> [--outlive] a short-lived owner: starts a sleeper through a guardian, writes the
+//                              sleeper's pid to <file> and exits without disposing the guardian
+if (args.Length > 0)
+{
+    switch (args[0])
+    {
+        case "--child":
+            return RunChild(stubborn: args.Length > 1 && args[1] == "--stubborn");
+        case "--sleep":
+            Thread.Sleep(Timeout.Infinite);
+            return 0;
+        case "--owner":
+            return RunOwner(args[1], outlive: args.Length > 2 && args[2] == "--outlive");
+    }
+}
 
 foreach (var stubborn in new[] { false, true })
 {
     var result = await RunScenarioAsync(stubborn);
+    if (result != 0)
+        return result;
+}
+
+foreach (var outlive in new[] { false, true })
+{
+    var result = RunOwnerScenario(outlive);
     if (result != 0)
         return result;
 }
@@ -46,6 +67,91 @@ static int RunChild(bool stubborn)
     Thread.Sleep(Timeout.Infinite);
     GC.KeepAlive(ignoreTerm);
     return 0;
+}
+
+static int RunOwner(string pidFile, bool outlive)
+{
+    // Not disposed on purpose: the guardian has to act when the process exits.
+    var guardian = new ProcessGuardian(new ProcessGuardianOptions { ChildrenOutliveOwner = outlive });
+    var sleeper = guardian.StartProcessWithStartInfo(SleeperStartInfo());
+    File.WriteAllText(pidFile, sleeper.Id.ToString());
+    return 0;
+}
+
+static ProcessStartInfo SleeperStartInfo() => new()
+{
+    FileName = Environment.ProcessPath!,
+    Arguments = "--sleep",
+    UseShellExecute = false,
+    CreateNoWindow = true,
+    RedirectStandardInput = true,
+    RedirectStandardOutput = true,
+    RedirectStandardError = true,
+};
+
+// The owner starts a child through a guardian and exits. A default guardian ends the child with its
+// owner; one created with ChildrenOutliveOwner leaves it running.
+static int RunOwnerScenario(bool outlive)
+{
+    var name = outlive ? "owner exit, children outlive owner" : "owner exit, default";
+    var pidFile = Path.Combine(Path.GetTempPath(), $"cpg-aot-smoke-{Guid.NewGuid():N}.pid");
+    try
+    {
+        using var owner = Process.Start(new ProcessStartInfo
+        {
+            FileName = Environment.ProcessPath!,
+            Arguments = outlive ? $"--owner \"{pidFile}\" --outlive" : $"--owner \"{pidFile}\"",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        })!;
+
+        if (!owner.WaitForExit(TimeSpan.FromSeconds(30)) || !File.Exists(pidFile)
+            || !int.TryParse(File.ReadAllText(pidFile), out var sleeperId))
+        {
+            Console.Error.WriteLine($"FAIL ({name}): the owner did not report its child and exit");
+            return 1;
+        }
+
+        if (outlive)
+        {
+            // Give a wrongly delivered termination time to show before judging the child alive.
+            Thread.Sleep(TimeSpan.FromSeconds(2));
+            var survived = IsRunning(sleeperId);
+            if (survived)
+                Process.GetProcessById(sleeperId).Kill();
+
+            if (!survived || !WaitUntilGone(sleeperId))
+            {
+                Console.Error.WriteLine($"FAIL ({name}): the child did not outlive its owner");
+                return 1;
+            }
+        }
+        else if (!WaitUntilGone(sleeperId))
+        {
+            Console.Error.WriteLine($"FAIL ({name}): the child is still running after its owner exited");
+            return 1;
+        }
+
+        Console.WriteLine($"ok ({name})");
+        return 0;
+    }
+    finally
+    {
+        File.Delete(pidFile);
+    }
+}
+
+static bool IsRunning(int processId)
+{
+    try
+    {
+        using var process = Process.GetProcessById(processId);
+        return !process.HasExited;
+    }
+    catch (ArgumentException)
+    {
+        return false;
+    }
 }
 
 static async Task<int> RunScenarioAsync(bool stubborn)

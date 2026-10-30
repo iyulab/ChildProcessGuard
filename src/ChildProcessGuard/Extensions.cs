@@ -294,6 +294,18 @@ public class ProcessGuardianBuilder
     }
 
     /// <summary>
+    /// Lets the managed processes keep running after the guardian is disposed or its owner exits.
+    /// See <see cref="ProcessGuardianOptions.ChildrenOutliveOwner"/> for what that gives up.
+    /// </summary>
+    /// <param name="enabled">Whether the processes outlive the owner</param>
+    /// <returns>Builder instance</returns>
+    public ProcessGuardianBuilder WithChildrenOutliveOwner(bool enabled = true)
+    {
+        _options.ChildrenOutliveOwner = enabled;
+        return this;
+    }
+
+    /// <summary>
     /// Enables or disables throwing exceptions on process operation failures
     /// </summary>
     /// <param name="enabled">Whether to throw on failures</param>
