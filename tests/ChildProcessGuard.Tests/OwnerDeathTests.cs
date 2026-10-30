@@ -70,6 +70,24 @@ public sealed class OwnerDeathTests : IDisposable
             "the job object ends the children of an owner that was killed");
     }
 
+#if NET10_0_OR_GREATER
+    [Fact(SkipWhen = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires a Unix platform")]
+    public async Task OwnerSigterm_WithCleanupOnSigterm_TerminatesChildAndGrandchild_AndTheOwnerStillEnds()
+    {
+        var pidFile = Path.Combine(_directory, "pid");
+        StartOwner(pidFile, "wait --sigterm");
+        WaitForChildTree(pidFile);
+
+        NativeMethods.SendSignal(_owner!.Id, NativeMethods.SIGTERM).Should().Be(0);
+        WaitForExitOrFail(_owner);
+
+        // The handler cleans up and does not cancel the signal: the owner ends as a SIGTERM ends it (128 + 15)
+        _owner.ExitCode.Should().Be(143);
+        (await WaitUntilAsync(() => _pids.All(pid => !IsProcessRunning(pid)))).Should().BeTrue(
+            "the children of an owner that received SIGTERM should end with it when the option is set");
+    }
+#endif
+
     private void StartOwner(string pidFile, string mode)
     {
         var harness = Path.Combine(HarnessDirectory, "ChildProcessGuard.OwnerHarness.dll");

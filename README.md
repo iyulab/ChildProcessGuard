@@ -262,6 +262,19 @@ var backend = guardian.StartProcess("backend", "--serve");
 
 While the guardian lives it still tracks the children, and `KillAllProcessesAsync` and `TerminateProcessAsync` terminate them as usual. `Dispose`, the exit of the process and Ctrl+C release the children instead. On Windows the job object is created without `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`; on Unix nothing signals the children when the guardian is disposed. The guarantee that the children are cleaned up is gone for such a guardian: if the owner crashes or is killed, they keep running and the caller is responsible for them.
 
+### Stopping on SIGTERM (Unix)
+
+`SIGTERM` is the signal systemd, Docker and Kubernetes send to stop a process, and .NET does not raise `AppDomain.ProcessExit` for it. A process stopped that way ends without the guardian's process-exit hook running, so its children keep running. In the `net10.0` build a guardian can handle the signal itself:
+
+```csharp
+using var guardian = new ProcessGuardianBuilder()
+    .WithKillTimeout(TimeSpan.FromSeconds(10))
+    .WithCleanupOnSigterm()
+    .Build();
+```
+
+On `SIGTERM` the guardian is disposed exactly as it is when the process exits, and the process then ends the way it would have without the handler. This is off by default because it ends the children the moment the signal arrives: an application that keeps working after `SIGTERM` until it has drained, a generic host for example, should dispose the guardian from its own shutdown instead. The handler waits for the termination, which can take up to the kill timeout, so give the process a stop grace period longer than that. `SIGKILL` and a crash run no code in the process and still leave the children running on Unix.
+
 ### Cross-Platform Example
 
 ```csharp
@@ -300,7 +313,8 @@ var options = new ProcessGuardianOptions
     ThrowOnProcessOperationFailure = false,             // Exception handling behavior
     LogAction = msg => Console.WriteLine(msg),          // Custom log handler (optional)
     CloseRequest = null,                                // Custom graceful close request (optional)
-    ChildrenOutliveOwner = false                        // Leave the children running when the owner exits
+    ChildrenOutliveOwner = false,                       // Leave the children running when the owner exits
+    CleanupOnSigterm = false                            // Unix, net10.0 build only: end the children on SIGTERM
 };
 
 using var guardian = new ProcessGuardian(options);

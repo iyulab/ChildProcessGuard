@@ -17,6 +17,9 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
     private IntPtr _jobHandle = IntPtr.Zero;
     private int _disposed = 0; // 0 = not disposed, 1 = disposed (thread-safe)
     private readonly object _slotLock = new();
+#if NET6_0_OR_GREATER
+    private PosixSignalRegistration? _sigtermRegistration;
+#endif
     private int _pendingStarts; // starts that passed the MaxManagedProcesses check and are not tracked yet
     private readonly bool _isWindows;
     private readonly bool _isUnix;
@@ -71,6 +74,12 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
         // Register process exit event handler
         AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
         Console.CancelKeyPress += OnCancelKeyPress;
+#if NET6_0_OR_GREATER
+        if (_options.CleanupOnSigterm && _isUnix)
+        {
+            _sigtermRegistration = PosixSignalRegistration.Create(PosixSignal.SIGTERM, OnSigterm);
+        }
+#endif
 
         // Initialize platform-specific features
         if (_isWindows)
@@ -919,10 +928,28 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
         }
     }
 
+#if NET6_0_OR_GREATER
+    private void OnSigterm(PosixSignalContext context)
+    {
+        // The signal is not cancelled: once the children are dealt with, the process ends the way it would have.
+        try
+        {
+            Dispose();
+        }
+        catch (Exception ex)
+        {
+            OnProcessError("Sigterm", ex);
+        }
+    }
+#endif
+
     private void UnregisterEventHandlers()
     {
         AppDomain.CurrentDomain.ProcessExit -= OnProcessExit;
         Console.CancelKeyPress -= OnCancelKeyPress;
+#if NET6_0_OR_GREATER
+        _sigtermRegistration?.Dispose();
+#endif
     }
 
     private void ThrowIfDisposed()

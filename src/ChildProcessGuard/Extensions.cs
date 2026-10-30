@@ -305,6 +305,20 @@ public class ProcessGuardianBuilder
         return this;
     }
 
+#if NET6_0_OR_GREATER
+    /// <summary>
+    /// Ends the managed processes when the owning process receives <c>SIGTERM</c> (Unix, <c>net10.0</c> build only).
+    /// See <see cref="ProcessGuardianOptions.CleanupOnSigterm"/> for what that does and costs.
+    /// </summary>
+    /// <param name="enabled">Whether to clean up on <c>SIGTERM</c></param>
+    /// <returns>Builder instance</returns>
+    public ProcessGuardianBuilder WithCleanupOnSigterm(bool enabled = true)
+    {
+        _options.CleanupOnSigterm = enabled;
+        return this;
+    }
+
+#endif
     /// <summary>
     /// Enables or disables throwing exceptions on process operation failures
     /// </summary>

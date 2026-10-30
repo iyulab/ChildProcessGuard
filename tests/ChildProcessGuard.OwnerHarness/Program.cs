@@ -5,12 +5,13 @@ using ChildProcessGuard;
 // reports the child's process ID in a file, and then either waits to be ended from outside or exits
 // once told to. The test project ends it in different ways and checks what happens to the children.
 //
-//   ChildProcessGuard.OwnerHarness <pid-file> <wait|exit>
+//   ChildProcessGuard.OwnerHarness <pid-file> <wait|exit> [--sigterm]
 //
+// "--sigterm" sets ProcessGuardianOptions.CleanupOnSigterm.
 // "exit" returns from Main once "<pid-file>.go" exists, so the process ends the ordinary way.
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("usage: ChildProcessGuard.OwnerHarness <pid-file> <wait|exit>");
+    Console.Error.WriteLine("usage: ChildProcessGuard.OwnerHarness <pid-file> <wait|exit> [--sigterm]");
     return 2;
 }
 
@@ -18,7 +19,7 @@ var pidFile = args[0];
 var mode = args[1];
 
 // Not disposed on purpose: the guardian has to act when this process ends.
-var guardian = new ProcessGuardian();
+var guardian = new ProcessGuardian(new ProcessGuardianOptions { CleanupOnSigterm = args.Contains("--sigterm") });
 
 var startInfo = OperatingSystem.IsWindows()
     ? new ProcessStartInfo("cmd.exe", "/c ping -n 60 127.0.0.1 >nul")

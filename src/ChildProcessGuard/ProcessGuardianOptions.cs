@@ -105,6 +105,32 @@ public class ProcessGuardianOptions
     /// </remarks>
     public bool ChildrenOutliveOwner { get; set; } = false;
 
+#if NET6_0_OR_GREATER
+    /// <summary>
+    /// Whether a <c>SIGTERM</c> sent to the owning process ends the managed processes before the process
+    /// exits. Only available in the <c>net10.0</c> build, and only has an effect on Unix. The default is
+    /// <c>false</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>SIGTERM</c> is the signal that systemd, Docker and Kubernetes send to stop a process, and
+    /// .NET does not raise <see cref="AppDomain.ProcessExit"/> for it, so without this option the children
+    /// of a process stopped that way keep running. With it, the guardian registers a <c>SIGTERM</c> handler
+    /// that disposes it exactly as the process-exit hook would, and then leaves the process to end the
+    /// way it would have without the handler. A <c>SIGKILL</c> or a crash still runs no code, and the
+    /// children survive it on Unix.
+    /// </para>
+    /// <para>
+    /// It is off by default because it ends the children the moment the signal arrives. An application that
+    /// keeps working after <c>SIGTERM</c> until it has drained — a generic host, for example — and wants
+    /// its children to run meanwhile should dispose the guardian from its own shutdown instead. The handler
+    /// waits for the termination to finish, which can take up to <see cref="ProcessKillTimeout"/>, so an
+    /// orchestrator's stop grace period should be longer than that.
+    /// </para>
+    /// </remarks>
+    public bool CleanupOnSigterm { get; set; } = false;
+#endif
+
     /// <summary>
     /// Creates a default configuration
     /// </summary>
@@ -154,7 +180,10 @@ public class ProcessGuardianOptions
             ThrowOnProcessOperationFailure = this.ThrowOnProcessOperationFailure,
             LogAction = this.LogAction,
             CloseRequest = this.CloseRequest,
-            ChildrenOutliveOwner = this.ChildrenOutliveOwner
+            ChildrenOutliveOwner = this.ChildrenOutliveOwner,
+#if NET6_0_OR_GREATER
+            CleanupOnSigterm = this.CleanupOnSigterm
+#endif
         };
     }
 }
