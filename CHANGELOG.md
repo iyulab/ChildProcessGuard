@@ -3,7 +3,7 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.5.0] - 2026-10-30
 
 ### Added
 - `ProcessGuardianOptions.ChildrenOutliveOwner` and `ProcessGuardianBuilder.WithChildrenOutliveOwner` let the managed processes keep running after the guardian is disposed or its owner exits, for a launcher or updater that starts a long-lived child and then exits on purpose. While the guardian lives the processes are tracked and terminated as usual (`KillAllProcessesAsync`, `TerminateProcessAsync`, `CloseRequest`); `Dispose`, process exit and Ctrl+C release them instead. On Windows the job object is created without `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`; on Unix nothing signals the processes on disposal. The default is unchanged: children end with their owner.
