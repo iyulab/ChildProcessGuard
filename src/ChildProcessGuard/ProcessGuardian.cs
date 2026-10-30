@@ -16,6 +16,8 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
     private readonly Timer? _cleanupTimer;
     private IntPtr _jobHandle = IntPtr.Zero;
     private int _disposed = 0; // 0 = not disposed, 1 = disposed (thread-safe)
+    private readonly object _slotLock = new();
+    private int _pendingStarts; // starts that passed the MaxManagedProcesses check and are not tracked yet
     private readonly bool _isWindows;
     private readonly bool _isUnix;
 
@@ -156,11 +158,19 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
         if (startInfo == null)
             throw new ArgumentNullException(nameof(startInfo));
 
-        if (_managedProcesses.Count >= _options.MaxManagedProcesses)
+        // Reserve a slot before the child starts. Checking the count alone lets concurrent starts all
+        // pass the check before any of them is tracked, since starting a process takes milliseconds.
+        lock (_slotLock)
         {
-            throw new InvalidOperationException($"Maximum number of managed processes ({_options.MaxManagedProcesses}) reached");
+            if (_managedProcesses.Count + _pendingStarts >= _options.MaxManagedProcesses)
+            {
+                throw new InvalidOperationException($"Maximum number of managed processes ({_options.MaxManagedProcesses}) reached");
+            }
+
+            _pendingStarts++;
         }
 
+        var slotReserved = true;
         Process? process = null;
         ManagedProcessInfo? processInfo = null;
         try
@@ -176,7 +186,13 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
                 startInfo.Environment.Count > 0 ? startInfo.Environment.Where(kvp => kvp.Value != null).ToDictionary(kvp => kvp.Key, kvp => kvp.Value!) : null
             );
 
-            Track(processInfo);
+            // Tracking and releasing the reservation happen together, so the process is never counted twice or not at all.
+            lock (_slotLock)
+            {
+                Track(processInfo);
+                _pendingStarts--;
+                slotReserved = false;
+            }
 
             // Platform-specific setup
             SetupPlatformSpecificProcessManagement(processInfo);
@@ -193,6 +209,14 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
+            if (slotReserved)
+            {
+                lock (_slotLock)
+                {
+                    _pendingStarts--;
+                }
+            }
+
             // Clean up on failure. If the child was already started, the caller will never receive
             // its Process — terminate it rather than leave an unreferenced child running.
             if (process != null)

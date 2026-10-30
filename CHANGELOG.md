@@ -12,6 +12,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Changed
 - Internal: the snapshot sharing used by concurrent process-tree walks no longer goes through `Lazy<T>`, and the Windows process-table read uses `Marshal.SizeOf<T>()`; both removed the trim and AOT analysis warnings of the `net10.0` build. Behavior is unchanged.
 
+### Fixed
+- `MaxManagedProcesses` is now enforced when processes are started concurrently. The limit was checked before a child started and the child was counted only once it was tracked, so concurrent `StartProcess` calls could all pass the check and exceed the limit; `StartProcessesBatchAsync` could exceed it by up to `maxConcurrency - 1`. A failed start gives its slot back.
+
 ## [1.4.0] - 2026-10-04
 
 ### Added

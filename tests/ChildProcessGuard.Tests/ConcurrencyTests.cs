@@ -168,51 +168,57 @@ public class ConcurrencyTests : IDisposable
     }
 
     [Fact]
-    public async Task SemaphoreLimit_ShouldEnforceConcurrency()
+    [Trait("Category", "Process")]
+    public async Task StartProcess_ConcurrentStarts_RespectMaxManagedProcesses()
     {
-        // Arrange
-        var options = new ProcessGuardianOptions
-        {
-            MaxManagedProcesses = 100
-        };
-        _guardian = new ProcessGuardian(options);
-        var executable = GetTestExecutable();
+        // Arrange - the limit is checked before a child starts, and starting takes long enough that
+        // every concurrent caller used to pass the check before any child was tracked
+        _guardian = new ProcessGuardian(new ProcessGuardianOptions { MaxManagedProcesses = 2 });
+        using var go = new ManualResetEventSlim();
 
-        var activeCount = 0;
-        var maxConcurrent = 0;
-        var lockObj = new object();
-
-        // Act - Try to start more processes than semaphore allows
-        var tasks = Enumerable.Range(0, 100)
-            .Select(async i =>
+        // Act
+        var attempts = Enumerable.Range(0, 8)
+            .Select(_ => Task.Run(() =>
             {
-                lock (lockObj)
-                {
-                    activeCount++;
-                    maxConcurrent = Math.Max(maxConcurrent, activeCount);
-                }
-
+                go.Wait(TestContext.Current.CancellationToken);
                 try
                 {
-                    var process = await _guardian.StartProcessAsync(executable, GetTestArguments());
-                    await Task.Delay(10, TestContext.Current.CancellationToken);
-                    return process;
+                    return (Process?)_guardian.StartProcessWithStartInfo(GetLongRunningProcessStartInfo());
                 }
-                finally
+                catch (InvalidOperationException)
                 {
-                    lock (lockObj)
-                    {
-                        activeCount--;
-                    }
+                    return null;
                 }
-            })
+            }, TestContext.Current.CancellationToken))
             .ToArray();
-
-        var results = await Task.WhenAll(tasks);
+        go.Set();
+        var results = await Task.WhenAll(attempts);
 
         // Assert
-        results.Should().HaveCount(100);
-        maxConcurrent.Should().BeLessThanOrEqualTo(options.MaxManagedProcesses);
+        results.Count(p => p != null).Should().Be(2);
+        _guardian.ManagedProcessCount.Should().Be(2);
+    }
+
+    [Fact]
+    [Trait("Category", "Process")]
+    public void StartProcess_FailedStart_ReleasesItsSlot()
+    {
+        // Arrange
+        _guardian = new ProcessGuardian(new ProcessGuardianOptions { MaxManagedProcesses = 1 });
+        var missing = new ProcessStartInfo { FileName = "child-process-guard-no-such-program", UseShellExecute = false };
+
+        // Act - failed starts must not use up the only slot
+        for (var i = 0; i < 3; i++)
+        {
+            _guardian.Invoking(g => g.StartProcessWithStartInfo(missing)).Should().Throw<Exception>()
+                .Which.Should().NotBeOfType<InvalidOperationException>();
+        }
+
+        var process = _guardian.StartProcessWithStartInfo(GetLongRunningProcessStartInfo());
+
+        // Assert
+        _guardian.ManagedProcessCount.Should().Be(1);
+        process.HasExited.Should().BeFalse();
     }
 
     [Fact]
