@@ -73,7 +73,7 @@ public class WindowsSpecificTests : IDisposable
         await _guardian.DisposeAsync();
 
         // Assert - Process should be terminated
-        (await WaitUntilAsync(() => !IsProcessRunning(processId))).Should().BeTrue("Process should be terminated when guardian is disposed");
+        (await WaitUntilAsync(() => process.HasExited)).Should().BeTrue("Process should be terminated when guardian is disposed");
     }
 
     [Fact(SkipUnless = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires Windows")]

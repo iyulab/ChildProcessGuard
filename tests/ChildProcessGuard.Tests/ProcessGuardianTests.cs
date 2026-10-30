@@ -210,7 +210,6 @@ public class ProcessGuardianTests : IDisposable
         var arguments = GetLongRunningArguments();
 
         var process = _guardian.StartProcess(executable, arguments);
-        var processId = process.Id;
 
         // Act
         _guardian.Dispose();
@@ -218,8 +217,9 @@ public class ProcessGuardianTests : IDisposable
         // Assert
         _guardian.IsDisposed.Should().BeTrue();
 
-        // Process should be terminated
-        WaitUntil(() => !IsProcessRunning(processId)).Should().BeTrue();
+        // Process should be terminated. Judged through the Process object: its handle keeps the process ID from
+        // being given to another process, which a lookup by ID some time after the exit cannot rule out.
+        WaitUntil(() => process.HasExited).Should().BeTrue();
     }
 
     [Fact]

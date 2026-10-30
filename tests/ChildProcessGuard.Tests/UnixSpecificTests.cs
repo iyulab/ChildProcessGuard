@@ -167,7 +167,6 @@ public class UnixSpecificTests : IDisposable
         // Arrange
         _guardian = new ProcessGuardian();
         var process = _guardian.StartProcess("/bin/sleep", "60");
-        var processId = process.Id;
 
         // Act
         _guardian.Dispose();
@@ -175,7 +174,7 @@ public class UnixSpecificTests : IDisposable
         // Assert
         _guardian.IsDisposed.Should().BeTrue();
 
-        (await WaitUntilAsync(() => !IsProcessRunning(processId))).Should().BeTrue("Process should be terminated on Dispose");
+        (await WaitUntilAsync(() => process.HasExited)).Should().BeTrue("Process should be terminated on Dispose");
     }
 
     [Fact(SkipWhen = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires a Unix platform")]

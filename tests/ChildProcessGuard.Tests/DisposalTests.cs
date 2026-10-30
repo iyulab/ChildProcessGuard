@@ -20,9 +20,6 @@ public class DisposalTests
         var process1 = guardian.StartProcess(executable, GetLongRunningArguments());
         var process2 = guardian.StartProcess(executable, GetLongRunningArguments());
 
-        var pid1 = process1.Id;
-        var pid2 = process2.Id;
-
         // Act
         guardian.Dispose();
 
@@ -33,8 +30,8 @@ public class DisposalTests
         guardian.IsDisposed.Should().BeTrue();
 
         // Processes should be terminated
-        IsProcessRunning(pid1).Should().BeFalse();
-        IsProcessRunning(pid2).Should().BeFalse();
+        process1.HasExited.Should().BeTrue();
+        process2.HasExited.Should().BeTrue();
     }
 
     [Fact]
