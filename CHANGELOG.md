@@ -15,6 +15,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Internal: the snapshot sharing used by concurrent process-tree walks no longer goes through `Lazy<T>`, and the Windows process-table read uses `Marshal.SizeOf<T>()`; both removed the trim and AOT analysis warnings of the `net10.0` build. Behavior is unchanged.
 
 ### Fixed
+- Windows: a process that could not be assigned to the Job Object, or a guardian whose Job Object could not be created, was reported only through the log, which is off unless detailed logging is enabled. It is now also raised through `ProcessError` with the operation `AssignProcessToJobObject`, since such a process is not ended when its owner is killed or crashes.
 - `MaxManagedProcesses` is now enforced when processes are started concurrently. The limit was checked before a child started and the child was counted only once it was tracked, so concurrent `StartProcess` calls could all pass the check and exceed the limit; `StartProcessesBatchAsync` could exceed it by up to `maxConcurrency - 1`. A failed start gives its slot back.
 
 ## [1.4.0] - 2026-10-04

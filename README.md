@@ -349,7 +349,7 @@ What happens to the children of the process that owns the guardian, by how that 
 | receives `SIGTERM`, what systemd, Docker and Kubernetes send | not applicable | children keep running, unless `CleanupOnSigterm` is set (`net10.0` build) |
 | is killed (`kill -9`, the OOM killer, `taskkill /f`) or crashes | children end (Job Object) | **children keep running** |
 
-Termination by the guardian (`Dispose`, `KillAllProcesses`, `TerminateProcessAsync`) reaches the whole tree of a process on Windows, because the Job Object owns every descendant. On Unix it walks the tree from the process that is still running, so a descendant whose parent has already exited before the termination (a process that daemonizes itself, for example) is no longer reachable and is left running; `Process.Kill(entireProcessTree: true)` has the same limit. On Windows the guarantee holds for a process once it has been assigned to the Job Object (`ManagedProcessInfo.IsJobAssigned`).
+Termination by the guardian (`Dispose`, `KillAllProcesses`, `TerminateProcessAsync`) reaches the whole tree of a process on Windows, because the Job Object owns every descendant. On Unix it walks the tree from the process that is still running, so a descendant whose parent has already exited before the termination (a process that daemonizes itself, for example) is no longer reachable and is left running; `Process.Kill(entireProcessTree: true)` has the same limit. On Windows the guarantee holds for a process once it has been assigned to the Job Object (`ManagedProcessInfo.IsJobAssigned`); when that fails, `ProcessError` is raised with the operation `AssignProcessToJobObject` and the process is tracked without the guarantee.
 
 ## How It Works
 

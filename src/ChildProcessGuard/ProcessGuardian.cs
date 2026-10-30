@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
@@ -556,28 +557,47 @@ public class ProcessGuardian : IDisposable, IAsyncDisposable
 
     #region Private Methods
 
-    private void SetupPlatformSpecificProcessManagement(ManagedProcessInfo processInfo)
+    internal void SetupPlatformSpecificProcessManagement(ManagedProcessInfo processInfo)
     {
-        if (_isWindows && _jobHandle != IntPtr.Zero)
+        if (_isWindows)
         {
-            try
+            // The Job Object is what ends the process when the owner is killed or crashes, so a process
+            // that is not in it has lost the guarantee the library is named for. That is reported through
+            // ProcessError, not only logged: the log is off unless detailed logging is enabled.
+            Exception? failure = null;
+
+            if (_jobHandle == IntPtr.Zero)
             {
-                if (NativeMethods.AssignProcessToJobObject(_jobHandle, processInfo.Process.Handle))
+                failure = new InvalidOperationException(
+                    "The job object could not be created when the guardian was constructed, so the process is not covered by the kernel guarantee that ends it with its owner.");
+            }
+            else
+            {
+                try
                 {
-                    processInfo.IsJobAssigned = true;
-                    OnProcessLifecycleEvent(processInfo, ProcessLifecycleEventType.JobObjectAssigned);
-                    LogMessage($"Process {processInfo.Id} assigned to job object", LogLevel.Debug);
+                    if (NativeMethods.AssignProcessToJobObject(_jobHandle, processInfo.Process.Handle))
+                    {
+                        processInfo.IsJobAssigned = true;
+                        OnProcessLifecycleEvent(processInfo, ProcessLifecycleEventType.JobObjectAssigned);
+                        LogMessage($"Process {processInfo.Id} assigned to job object", LogLevel.Debug);
+                    }
+                    else
+                    {
+                        var error = Marshal.GetLastWin32Error();
+                        LogMessage($"Failed to assign process {processInfo.Id} to job object (Error: {error}). Using manual tracking for this process.", LogLevel.Warning);
+                        failure = new Win32Exception(error, $"The process could not be assigned to the job object (error {error}), so it is not covered by the kernel guarantee that ends it with its owner.");
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    var error = Marshal.GetLastWin32Error();
-                    LogMessage($"Failed to assign process {processInfo.Id} to job object (Error: {error}). Using manual tracking for this process.", LogLevel.Warning);
+                    LogMessage($"Job Object assignment failed for process {processInfo.Id}: {ex.Message}. Using manual tracking.", LogLevel.Warning);
+                    failure = ex;
                 }
             }
-            catch (Exception ex)
+
+            if (failure != null)
             {
-                LogMessage($"Job Object assignment failed for process {processInfo.Id}: {ex.Message}. Using manual tracking.", LogLevel.Warning);
-                OnProcessError("AssignProcessToJobObject", ex, processInfo.Id);
+                OnProcessError("AssignProcessToJobObject", failure, processInfo.Id);
             }
         }
         else if (_isUnix)

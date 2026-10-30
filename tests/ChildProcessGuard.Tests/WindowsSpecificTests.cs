@@ -107,6 +107,52 @@ public class WindowsSpecificTests : IDisposable
     }
 
     [Fact(SkipUnless = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires Windows")]
+    public void JobObjectAssignmentFailure_IsReportedThroughProcessError()
+    {
+        // Arrange - a process that has already exited cannot be assigned to a job
+        _guardian = new ProcessGuardian();
+        var errors = new List<ProcessErrorEventArgs>();
+        var assigned = false;
+        _guardian.ProcessError += (_, e) => errors.Add(e);
+        _guardian.ProcessLifecycleEvent += (_, e) => assigned |= e.EventType == ProcessLifecycleEventType.JobObjectAssigned;
+
+        using var process = Process.Start(GetTestProcessStartInfo())!;
+        WaitForExitOrFail(process);
+        var info = new ManagedProcessInfo(process, "cmd.exe", "/c exit 0", null, null);
+
+        // Act
+        _guardian.SetupPlatformSpecificProcessManagement(info);
+
+        // Assert
+        info.IsJobAssigned.Should().BeFalse();
+        assigned.Should().BeFalse();
+        errors.Should().ContainSingle();
+        errors[0].Operation.Should().Be("AssignProcessToJobObject");
+        errors[0].ProcessId.Should().Be(process.Id);
+        errors[0].Exception.Should().BeOfType<System.ComponentModel.Win32Exception>();
+    }
+
+    [Fact(SkipUnless = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires Windows")]
+    public void MissingJobObject_IsReportedForEachStartedProcess()
+    {
+        // Arrange - a guardian whose job object could not be created
+        _guardian = new ProcessGuardian();
+        typeof(ProcessGuardian).GetField("_jobHandle", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(_guardian, IntPtr.Zero);
+        var errors = new List<ProcessErrorEventArgs>();
+        _guardian.ProcessError += (_, e) => errors.Add(e);
+
+        // Act
+        var process = _guardian.StartProcessWithStartInfo(GetLongRunningProcessStartInfo());
+
+        // Assert
+        errors.Should().ContainSingle();
+        errors[0].Operation.Should().Be("AssignProcessToJobObject");
+        errors[0].ProcessId.Should().Be(process.Id);
+        _guardian.GetProcessInfo(process.Id)!.IsJobAssigned.Should().BeFalse();
+    }
+
+    [Fact(SkipUnless = nameof(TestPlatform.IsWindows), SkipType = typeof(TestPlatform), Skip = "Requires Windows")]
     public void KillProcessTree_OnWindows_KillsRootAndDescendants()
     {
         // cmd.exe is the root; the ping it runs is its child. Not started through a guardian, so no
