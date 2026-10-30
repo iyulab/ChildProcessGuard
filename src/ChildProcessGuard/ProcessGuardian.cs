@@ -5,9 +5,10 @@ using System.Runtime.InteropServices;
 namespace ChildProcessGuard;
 
 /// <summary>
-/// A cross-platform process management library that ensures child processes
-/// automatically terminate when the parent process exits unexpectedly.
-/// Enhanced version with improved error handling, logging, and cross-platform support.
+/// A cross-platform process management library that makes child processes end with the process that
+/// started them. On Windows a Job Object ends them even when the owner is killed or crashes; on Unix
+/// they are ended when the owner exits or is stopped with Ctrl+C (and, with
+/// <c>ProcessGuardianOptions.CleanupOnSigterm</c>, on <c>SIGTERM</c>), but not when it is killed with <c>SIGKILL</c>.
 /// </summary>
 public class ProcessGuardian : IDisposable, IAsyncDisposable
 {

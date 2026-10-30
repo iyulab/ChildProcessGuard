@@ -11,6 +11,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - The `net10.0` build is declared trimming and Native AOT compatible (`IsAotCompatible`), and CI publishes a small Native AOT executable on Linux (x64, arm64) and Windows that starts a process tree, terminates it and verifies that it is gone.
 
 ### Changed
+- The package description, README and API summary now state what is guaranteed on each platform. The guarantee that children end when the owner is killed or crashes is the Windows Job Object's; on Unix it covers a normal exit and Ctrl+C (and `SIGTERM` with `CleanupOnSigterm`), and termination walks the tree of the process that is still running. See "Guarantees by platform" in the README.
 - Internal: the snapshot sharing used by concurrent process-tree walks no longer goes through `Lazy<T>`, and the Windows process-table read uses `Marshal.SizeOf<T>()`; both removed the trim and AOT analysis warnings of the `net10.0` build. Behavior is unchanged.
 
 ### Fixed

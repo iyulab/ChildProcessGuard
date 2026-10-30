@@ -5,12 +5,12 @@
 [![Build Status](https://github.com/iyulab/ChildProcessGuard/actions/workflows/dotnet.yml/badge.svg)](https://github.com/iyulab/ChildProcessGuard/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-A cross-platform .NET library that ensures child processes automatically terminate when the parent process exits unexpectedly.
+A cross-platform .NET library that makes child processes end with the process that started them: a kernel-level guarantee on Windows (Job Objects), process-tree signalling on Unix. [What is covered on each platform](#guarantees-by-platform) differs.
 
 ## Features
 
 - **Cross-Platform Support**: Works on Windows, Linux, and macOS
-- **Automatic Cleanup**: Child processes terminate when the parent exits
+- **Automatic Cleanup**: Child processes terminate when the parent exits; on Windows also when it is killed or crashes
 - **Windows Job Objects**: Uses Job Objects for kernel-level process management on Windows
 - **Process Tree Termination**: Terminates all descendant processes via native APIs
 - **Async/Await Support**: Full asynchronous API with cancellation tokens
@@ -337,6 +337,19 @@ using var custom = new ProcessGuardianBuilder()
     .WithLogAction(msg => myLogger.Log(msg))
     .Build();
 ```
+
+## Guarantees by platform
+
+What happens to the children of the process that owns the guardian, by how that process ends:
+
+| The owner... | Windows | Linux / macOS |
+|---|---|---|
+| exits normally (`Dispose`, `Environment.Exit`, end of `Main`) | children end | children end (process-exit hook) |
+| is stopped with Ctrl+C | children end | children end |
+| receives `SIGTERM`, what systemd, Docker and Kubernetes send | not applicable | children keep running, unless `CleanupOnSigterm` is set (`net10.0` build) |
+| is killed (`kill -9`, the OOM killer, `taskkill /f`) or crashes | children end (Job Object) | **children keep running** |
+
+Termination by the guardian (`Dispose`, `KillAllProcesses`, `TerminateProcessAsync`) reaches the whole tree of a process on Windows, because the Job Object owns every descendant. On Unix it walks the tree from the process that is still running, so a descendant whose parent has already exited before the termination (a process that daemonizes itself, for example) is no longer reachable and is left running; `Process.Kill(entireProcessTree: true)` has the same limit. On Windows the guarantee holds for a process once it has been assigned to the Job Object (`ManagedProcessInfo.IsJobAssigned`).
 
 ## How It Works
 
